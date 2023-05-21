@@ -6,7 +6,7 @@
 --
 -- Note: Some ideas and bits taken from:
 -- https://github.com/vincens2005/lite-xl-gitdiff-highlight
--- https://github.com/lite-xl/lite-xl-plugins/blob/master/plugins/gitstatus.lua
+-- https://github.com/pragtical/plugins/blob/master/plugins/gitstatus.lua
 -- Thanks to everyone involved!
 --
 local core = require "core"

@@ -2,7 +2,7 @@
 
 This plugin provides base functionality that allows you to easily add support
 for any source control management system while saving you from having to
-re-implement editor integration. It uses Lite XL `process` api to allow
+re-implement editor integration. It uses Pragtical `process` api to allow
 async calling of the SCM binaries.
 
 You can easily implement your own SCM backend by extending `plugins.scm.backend`,
@@ -23,7 +23,6 @@ your `PATH` environment variable:
 * [git] - for projects versioned in git
 * [fossil] - for projects versioned in fossil
 * [language_diff] plugin - optional but recommended
-* [Widgets] - for confirmation messages, etc...
 
 Follow the usual plugin installation procedure. When opening projects the
 backend will be auto detected by using the backend's `detect()` method. Then
@@ -72,8 +71,7 @@ which code served as a source of copy-pasting and inspiration!
 
 [git]: https://git-scm.com/
 [fossil]: https://www.fossil-scm.org/
-[language_diff]: https://github.com/lite-xl/lite-xl-plugins/blob/master/plugins/language_diff.lua
-[Widgets]: https://github.com/lite-xl/lite-xl-widgets
+[language_diff]: https://github.com/pratical/plugins/blob/master/plugins/language_diff.lua
 [gitdiff]: https://github.com/vincens2005/lite-xl-gitdiff-highlight
 [gitstatus]: https://github.com/lite-xl/lite-xl-plugins/blob/master/plugins/gitstatus.lua
 [gitblame]: https://github.com/juliardi/lite-xl-gitblame
