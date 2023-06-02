@@ -54,6 +54,7 @@ local Object = require "core.object"
 ---@class plugins.scm.backend : core.object
 ---@field name string
 ---@field blocking boolean
+---@field running_commands table<string,boolean>
 ---@field command string
 ---@field cache plugins.scm.backend.cache[]
 ---@field super plugins.scm.backend
@@ -67,6 +68,7 @@ function Backend:new(name, command)
   self.cache = {}
   self.next_clean = os.time() + 20
   self.blocking = false
+  self.running_commands = {}
   self:set_command(command)
 end
 
@@ -210,6 +212,12 @@ end
 function Backend:execute(callback, directory, ...)
   if not self.command then return end
   local command = table.pack(self.command, ...)
+
+  -- prevent executing duplicated commands at once
+  local full_command = table.concat({directory, ...})
+  if self.running_commands[full_command] then return end
+  self.running_commands[full_command] = true
+
   local proc, errmsg, errcode
   local ran, ranerr = core.try(function()
     proc, errmsg, errcode = process.start(command, {cwd = directory})
@@ -217,10 +225,12 @@ function Backend:execute(callback, directory, ...)
       core.add_thread(function()
         callback(proc, errmsg, errcode)
         if proc and proc:running() then proc:kill() end
+        self.running_commands[full_command] = nil
       end)
     else
       callback(proc, errmsg, errcode)
       if proc and proc:running() then proc:kill() end
+      self.running_commands[full_command] = nil
     end
   end)
   if not proc then
@@ -230,6 +240,7 @@ function Backend:execute(callback, directory, ...)
       table.concat(command, " "),
       table.unpack(msg_code)
     )
+    self.running_commands[full_command] = nil
   end
 end
 
