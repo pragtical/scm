@@ -29,6 +29,16 @@ local MessageBox = require "widget.messagebox"
 ---@type table<string,plugins.scm.backend>
 local BACKENDS
 
+---Corrects the path set for git or fossil commands when using the settings ui.
+---@param path string
+---@return string path
+local function config_fix_path(path)
+  if not io.open(path, "rb") then
+    path = common.basename(path)
+  end
+  return path
+end
+
 ---@class config.plugins.smc
 ---@field highlighter boolean
 ---@field highlighter_alignment "right" | "left"
@@ -66,10 +76,10 @@ config.plugins.smc = common.merge({
       type = "FILE",
       default = "git",
       filters = {"git$", "git%.exe$"},
+      get_value = config_fix_path,
+      set_value = config_fix_path,
       on_apply = function(value)
-        if not BACKENDS.Git:set_command(value) then
-          BACKENDS.Git:set_command(common.basename(value))
-        end
+        BACKENDS.Git:set_command(value)
       end
     },
     {
@@ -79,10 +89,10 @@ config.plugins.smc = common.merge({
       type = "FILE",
       default = "fossil",
       filters = {"fossil$", "fossil%.exe$"},
+      get_value = config_fix_path,
+      set_value = config_fix_path,
       on_apply = function(value)
-        if not BACKENDS.Fossil:set_command(value) then
-          BACKENDS.Fossil:set_command(common.basename(value))
-        end
+        BACKENDS.Fossil:set_command(value)
       end
     }
   }
