@@ -94,7 +94,7 @@ function Git:get_staged(directory, callback)
     end
     self:add_to_cache("get_staged", staged, directory)
     callback(staged)
-  end, directory, "diff", "--name-only", "--cached")
+  end, directory, "--no-optional-locks", "diff", "--name-only", "--cached")
 end
 
 ---@param callback plugins.scm.backend.ongetbranch
@@ -196,7 +196,7 @@ function Git:get_commit_info(id, directory, callback)
     end
 
     callback(commit)
-  end, directory, "show", "--no-patch", id)
+  end, directory, "--no-optional-locks", "show", "--no-patch", id)
 end
 
 ---@param id string
@@ -206,7 +206,7 @@ function Git:get_commit_diff(id, directory, callback)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
-  end, directory, "show", "-U", id)
+  end, directory, "--no-optional-locks", "show", "-U", id)
 end
 
 ---@param directory string
@@ -215,7 +215,7 @@ function Git:get_diff(directory, callback)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
-  end, directory, "diff")
+  end, directory, "--no-optional-locks", "diff")
 end
 
 ---@param file string
@@ -227,7 +227,7 @@ function Git:get_file_diff(file, directory, callback)
     local diff = self:get_process_output(proc, "stdout")
     self:add_to_cache("get_file_diff", diff, directory, 1)
     callback(diff)
-  end, directory, "diff", common.relative_path(directory, file))
+  end, directory, "--no-optional-locks", "diff", common.relative_path(directory, file))
 end
 
 ---@param file string
@@ -261,7 +261,7 @@ function Git:get_file_status(file, directory, callback)
     end
     self:add_to_cache("get_file_status", status, file, 1)
     callback(status)
-  end, directory, "status", "-s", common.relative_path(directory, file))
+  end, directory, "--no-optional-locks", "status", "-s", common.relative_path(directory, file))
 end
 
 ---@param file string
@@ -292,7 +292,7 @@ function Git:get_file_blame(file, directory, callback)
     end
     self:add_to_cache("get_file_blame", list, file, 10)
     callback(#list > 0 and list or nil)
-  end, directory, "blame", common.relative_path(directory, file))
+  end, directory, "--no-optional-locks", "blame", common.relative_path(directory, file))
 end
 
 ---@param callback plugins.scm.backend.ongetstats
@@ -327,7 +327,7 @@ function Git:get_status(directory, callback)
       status = stdout
     end
     callback(status)
-  end, directory, "status")
+  end, directory, "--no-optional-locks", "status")
 end
 
 ---@param directory string Project directory

@@ -262,7 +262,7 @@ function Backend:execute(callback, directory, ...)
   if not proc then
     local msg_code = ran and {errmsg, errcode} or {ranerr, "-1"}
     core.error(
-      "[SCM error]: error while executing '%s' - %s:%s",
+      "[SCM] error while executing '%s' - %s:%s",
       table.concat(command, " "),
       table.unpack(msg_code)
     )
