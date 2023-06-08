@@ -1,4 +1,4 @@
--- mod-version:3
+-- mod-version:3.1
 --
 -- Source Control Management plugin.
 -- @copyright Jefferson Gonzalez <jgmdev@gmail.com>
@@ -366,8 +366,8 @@ end
 ---@param path string
 ---@return boolean
 function scm.is_scm_project(path)
-  for _, project in ipairs(core.project_directories) do
-    if path == project.name and PROJECTS[path] then
+  for _, project in ipairs(core.projects) do
+    if path == project.path and PROJECTS[path] then
       return true
     end
   end
@@ -987,8 +987,8 @@ command.add(
       project_dir = util.get_project_dir(av.doc.abs_filename)
       if project_dir and PROJECTS[project_dir] then valid = true end
     end
-    if not valid and PROJECTS[core.project_dir] then
-      valid, project_dir = true, core.project_dir
+    if not valid and PROJECTS[core.root_project().path] then
+      valid, project_dir = true, core.root_project().pathz
     end
     return valid, project_dir
   end, {
