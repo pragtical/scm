@@ -620,40 +620,40 @@ end
 ---@param doc? core.doc
 function scm.next_change(doc)
   doc = doc or util.get_current_doc()
-	if not doc or not doc.scm_diff then return end
-	local line, col = doc:get_selection()
+  if not doc or not doc.scm_diff then return end
+  local line, col = doc:get_selection()
 
-	while doc.scm_diff[line] do
-		line = line + 1
-	end
+  while doc.scm_diff[line] do
+    line = line + 1
+  end
 
-	while line < #doc.lines do
-		if doc.scm_diff[line] then
-			doc:set_selection(line, col, line, col)
-			return
-		end
-		line = line + 1
-	end
+  while line < #doc.lines do
+    if doc.scm_diff[line] then
+      doc:set_selection(line, col, line, col)
+      return
+    end
+    line = line + 1
+  end
 end
 
 ---Go to previous change in a file.
 ---@param doc? core.doc
 function scm.previous_change(doc)
-	doc = doc or util.get_current_doc()
-	if not doc or not doc.scm_diff then return end
-	local line, col = doc:get_selection()
+  doc = doc or util.get_current_doc()
+  if not doc or not doc.scm_diff then return end
+  local line, col = doc:get_selection()
 
-	while doc.scm_diff[line] do
-		line = line - 1
-	end
+  while doc.scm_diff[line] do
+    line = line - 1
+  end
 
-	while line > 0 do
-		if doc.scm_diff[line] then
-			doc:set_selection(line, col, line, col)
-			return
-		end
-		line = line - 1
-	end
+  while line > 0 do
+    if doc.scm_diff[line] then
+      doc:set_selection(line, col, line, col)
+      return
+    end
+    line = line - 1
+  end
 end
 
 ---Update the SCM status of all open projects.
@@ -1028,7 +1028,7 @@ command.add(
       doc.blame_list[line].commit,
       util.get_file_project_dir(doc.abs_filename)
     )
-	end
+  end
 })
 
 command.add(
@@ -1043,7 +1043,7 @@ command.add(
   ["scm:file-add"] = function(doc)
     ---@cast doc core.doc
     scm.add_path(doc.abs_filename)
-	end
+  end
 })
 
 command.add(
@@ -1152,13 +1152,13 @@ command.add(
     return false
   end, {
 
-	["scm:goto-previous-change"] = function(doc)
-		scm.previous_change(doc)
-	end,
+  ["scm:goto-previous-change"] = function(doc)
+    scm.previous_change(doc)
+  end,
 
-	["scm:goto-next-change"] = function(doc)
-		scm.next_change(doc)
-	end,
+  ["scm:goto-next-change"] = function(doc)
+    scm.next_change(doc)
+  end,
 })
 
 --------------------------------------------------------------------------------
