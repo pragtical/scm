@@ -54,7 +54,6 @@ local Object = require "core.object"
 ---@class plugins.scm.backend : core.object
 ---@field name string
 ---@field blocking boolean
----@field running_commands table<string,integer>
 ---@field command string
 ---@field cache plugins.scm.backend.cache[]
 ---@field super plugins.scm.backend
@@ -68,7 +67,6 @@ function Backend:new(name, command)
   self.cache = {}
   self.next_clean = os.time() + 20
   self.blocking = false
-  self.running_commands = {}
   self:set_command(command)
 end
 
@@ -205,16 +203,6 @@ function Backend:get_process_output(proc, from)
   return output
 end
 
----The maximum amount of duplicate commands to execute at once.
-local MAX_DUPLICATE_COMMANDS = 2
-
-local function decrement_running_command(self, command)
-  self.running_commands[command] = self.running_commands[command] - 1
-  if self.running_commands[command] == 0 then
-    self.running_commands[command] = nil
-  end
-end
-
 ---Call the scm command with the given parameters.
 ---@param callback plugins.scm.backend.onexecute
 ---@param directory string Path of project directory
@@ -222,28 +210,6 @@ end
 function Backend:execute(callback, directory, ...)
   if not self.command then return end
   local command = table.pack(self.command, ...)
-
-  -- prevent executing duplicated commands at once
-  local full_command = table.concat({directory, ...})
-  if self.running_commands[full_command] == MAX_DUPLICATE_COMMANDS then
-    core.log_quiet(
-      "[SCM] skipping duplicate call to: %s",
-      self.command
-        .. " "
-        .. table.concat({...}, " ")
-        .. "\non directory: " .. directory
-    )
-    return
-  end
-
-  -- increment running commands registry for current command
-  if not self.running_commands[full_command] then
-    self.running_commands[full_command] = 1
-  else
-    self.running_commands[full_command]
-      = self.running_commands[full_command] + 1
-  end
-
   local proc, errmsg, errcode
   local ran, ranerr = core.try(function()
     proc, errmsg, errcode = process.start(command, {cwd = directory})
@@ -251,12 +217,10 @@ function Backend:execute(callback, directory, ...)
       core.add_thread(function()
         callback(proc, errmsg, errcode)
         if proc and proc:running() then proc:kill() end
-        decrement_running_command(self, full_command)
       end)
     else
       callback(proc, errmsg, errcode)
       if proc and proc:running() then proc:kill() end
-      decrement_running_command(self, full_command)
     end
   end)
   if not proc then
@@ -266,7 +230,6 @@ function Backend:execute(callback, directory, ...)
       table.concat(command, " "),
       table.unpack(msg_code)
     )
-    decrement_running_command(self, full_command)
   end
 end
 
