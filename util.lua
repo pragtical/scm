@@ -21,7 +21,7 @@ end
 ---@param filepath string
 ---@return string? project_dir
 function util.get_file_project_dir(filepath)
-  for _, project in ipairs(core.projects) do
+  for _, project in ipairs(core.projects or {}) do
     if common.path_belongs_to(filepath, project.path) then
       return project.path
     end
