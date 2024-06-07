@@ -4,6 +4,43 @@
 local common = require "core.common"
 local Backend = require "plugins.scm.backend"
 
+---Get top level git directory of path in order to support submodules.
+---@param self plugins.scm.backend
+---@param path string
+---@return string
+local function git_toplevel_path(self, path)
+  local git_command = io.popen(
+    self.command .. " -C " .. "\"" .. path .. "\" "
+      .. "rev-parse --show-toplevel",
+    "r"
+  )
+  if git_command then
+    path = git_command:read("*a")
+    git_command:close()
+  end
+  return path:gsub("%s+$", "")
+end
+
+---Similar to git_toplevel_path() but with a base dir and file path
+---@param self plugins.scm.backend
+---@param directory string
+---@param file? string
+---@return string
+local function git_repo_dir(self, directory, file)
+  if not file then return git_toplevel_path(self, directory) end
+  local path = file
+  local path_info = system.get_file_info(path)
+  while not path_info or path_info.type == "file" do
+    path = common.dirname(path)
+    path_info = system.get_file_info(path)
+  end
+  -- prevent executing git if path same as base directory
+  if directory == path then
+    return directory
+  end
+  return git_toplevel_path(self, path)
+end
+
 ---@class plugins.scm.backend.git : plugins.scm.backend
 ---@field super plugins.scm.backend
 local Git = Backend:extend()
@@ -34,6 +71,7 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:stage_file(file, directory, callback)
+  directory = git_repo_dir(self, directory, file)
   self:execute(function(proc)
     local success = false
     local errmsg = ""
@@ -56,6 +94,7 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:unstage_file(file, directory, callback)
+  directory = git_repo_dir(self, directory, file)
   self:execute(function(proc)
     local success = false
     local errmsg = ""
@@ -77,7 +116,8 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.ongetstaged
 function Git:get_staged(directory, callback)
-  directory = directory:gsub("[/\\]$", "/")
+  directory = directory:gsub("[/\\]$", "")
+  directory = git_repo_dir(self, directory)
   local cached = self:get_from_cache("get_staged", directory)
   if cached then callback(cached, true) return end
   self:execute(function(proc)
@@ -99,6 +139,7 @@ end
 
 ---@param callback plugins.scm.backend.ongetbranch
 function Git:get_branch(directory, callback)
+  directory = git_repo_dir(self, directory)
   self:execute(function(proc)
     local branch = nil
     for idx, line in self:get_process_lines(proc, "stdout") do
@@ -115,16 +156,15 @@ function Git:get_branch(directory, callback)
   end, directory, "--no-optional-locks", "rev-parse", "--abbrev-ref", "HEAD")
 end
 
+---Get list of changes for a git directory or submodule.
+---@param self plugins.scm.backend
 ---@param directory string
----@param callback plugins.scm.backend.ongetchanges
-function Git:get_changes(directory, callback)
-  directory = directory:gsub("[/\\]$", "/")
-  local cached = self:get_from_cache("get_changes", directory)
-  if cached then callback(cached, true) return end
+---@param changes table Where to store the changes found
+---@param callback? function
+local function get_changes(self, directory, changes, callback)
   self:get_staged(directory, function(staged_files)
     self:execute(function(proc)
       ---@type plugins.scm.backend.filechange[]
-      local changes = {}
       local added = {}
       for idx, line in self:get_process_lines(proc, "stdout") do
         if line ~= "" then
@@ -156,9 +196,61 @@ function Git:get_changes(directory, callback)
           self:yield()
         end
       end
+      if callback then
+        callback()
+      end
+    end, directory, "--no-optional-locks", "status", "--short")
+  end)
+end
+
+---@param directory string
+---@param callback plugins.scm.backend.ongetchanges
+function Git:get_changes(directory, callback)
+  directory = directory:gsub("[/\\]$", "")
+  directory = git_repo_dir(self, directory)
+  local cached = self:get_from_cache("get_changes", directory)
+  if cached then callback(cached, true) return end
+  local changes = {}
+  get_changes(self, directory, changes, function()
+    -- get available submodule changes
+    self:execute(function(proc)
+      local submodules = {}
+      local mod_changes_done = {}
+      for _, line in self:get_process_lines(proc, "stdout") do
+        local submodule = line:match("%S+%s+(.+)")
+        if submodule then
+          submodule = submodule:match("^'(.+)'$")
+          local submodule_path = directory .. PATHSEP .. submodule
+          local submodule_info = system.get_file_info(submodule_path)
+          if
+            submodule ~= ""
+            and
+            submodule_info and submodule_info.type == "dir"
+          then
+            table.insert(submodules, submodule)
+          end
+        end
+      end
+      for idx, submodule in ipairs(submodules) do
+        local submodule_path = directory .. PATHSEP .. submodule
+        get_changes(self, submodule_path, changes, function()
+          mod_changes_done[idx] = true
+        end)
+      end
+      local alldone = false
+      while not alldone do
+        alldone = true
+        for idx, _ in ipairs(submodules) do
+          if not mod_changes_done[idx] then
+            alldone = false
+            break
+          end
+        end
+        self:yield()
+      end
       self:add_to_cache("get_changes", changes, directory)
       callback(changes)
-    end, directory, "--no-optional-locks", "status", "--short")
+    end, directory, "submodule", "foreach", "--recursive")
   end)
 end
 
@@ -166,6 +258,7 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommit
 function Git:get_commit_info(id, directory, callback)
+  directory = git_repo_dir(self, directory)
   self:execute(function(proc)
     ---@type plugins.scm.backend.commit
     local commit = {}
@@ -203,6 +296,7 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
 function Git:get_commit_diff(id, directory, callback)
+  directory = git_repo_dir(self, directory)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
@@ -212,6 +306,7 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
 function Git:get_diff(directory, callback)
+  directory = git_repo_dir(self, directory)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
@@ -221,6 +316,7 @@ end
 ---@param file string
 ---@param callback plugins.scm.backend.ongetdiff
 function Git:get_file_diff(file, directory, callback)
+  directory = git_repo_dir(self, directory, file)
   local cached = self:get_from_cache("get_file_diff", file)
   if cached then callback(cached, true) return end
   self:execute(function(proc)
@@ -234,6 +330,7 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetfilestatus
 function Git:get_file_status(file, directory, callback)
+  directory = git_repo_dir(self, directory, file)
   local cached = self:get_from_cache("get_file_status", file)
   if cached then callback(cached, true) return end
   self:execute(function(proc)
@@ -268,6 +365,7 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetfileblame
 function Git:get_file_blame(file, directory, callback)
+  directory = git_repo_dir(self, directory, file)
   local cached = self:get_from_cache("get_file_blame", file)
   if cached then callback(cached, true) return end
   self:execute(function(proc)
@@ -297,6 +395,7 @@ end
 
 ---@param callback plugins.scm.backend.ongetstats
 function Git:get_stats(directory, callback)
+  directory = git_repo_dir(self, directory)
   self:execute(function(proc)
     local inserts = 0
     local deletes = 0
@@ -317,6 +416,7 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.ongetstatus
 function Git:get_status(directory, callback)
+  directory = git_repo_dir(self, directory)
   self:execute(function(proc)
     local status = ""
     local stdout = self:get_process_output(proc, "stdout")
@@ -333,6 +433,7 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:pull(directory, callback)
+  directory = git_repo_dir(self, directory)
   self:execute(function(proc)
     local success = false
     local errmsg = ""
@@ -355,6 +456,7 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:revert_file(file, directory, callback)
+  directory = git_repo_dir(self, directory, file)
   self:execute(function(proc)
     local success = false
     local errmsg = ""
@@ -377,6 +479,7 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:add_path(path, directory, callback)
+  directory = git_repo_dir(self, directory, path)
   self:execute(function(proc)
     local success = false
     local errmsg = ""
@@ -399,6 +502,7 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:remove_path(path, directory, callback)
+  directory = git_repo_dir(self, directory, path)
   self:execute(function(proc)
     local success = false
     local errmsg = ""
@@ -422,6 +526,7 @@ end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:move_path(from, to, directory, callback)
+  directory = git_repo_dir(self, directory, from)
   self:execute(
     function(proc)
       local success = false
