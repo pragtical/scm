@@ -46,20 +46,23 @@ it will be associated to the project for subsequente use.
   - modifications
 * Display blame information for active document line.
   - View the diff changes for the associated commit.
+* View the commits history list for the entire project and also
+  for a specific file or directory path.
+  - View the diff of any commit on the list
 
 ## TODO
 
 There is still missing functionality, but some of the following comes to mind:
 
 - [ ] Pull and push
+- [ ] be able to commit current changes
+- [ ] maybe colorize tabs text depending on the file status
 - [x] detecting if the SCM binaries are missing
 - [x] maybe... allow configuring the SCM binaries path
-- [ ] maybe colorize tabs text depending on the file status
 - [x] restoring a file to a previous state
-- [ ] view the commit history of project or file
+- [x] view the commit history of project or file
 - [x] view diff of a specific file: `scm:file-diff`
 - [x] add, rename and remove files in version control
-- [ ] be able to commit current changes
 
 Suggestions for how to implement the above features are welcome as other ideas
 not listed above.
@@ -71,7 +74,7 @@ which code served as a source of copy-pasting and inspiration!
 
 [git]: https://git-scm.com/
 [fossil]: https://www.fossil-scm.org/
-[language_diff]: https://github.com/pratical/plugins/blob/master/plugins/language_diff.lua
+[language_diff]: https://github.com/pragtical/plugins/blob/master/plugins/language_diff.lua
 [gitdiff]: https://github.com/vincens2005/lite-xl-gitdiff-highlight
 [gitstatus]: https://github.com/lite-xl/lite-xl-plugins/blob/master/plugins/gitstatus.lua
 [gitblame]: https://github.com/juliardi/lite-xl-gitblame

@@ -49,7 +49,8 @@ TreeViewMenu:register(
     TreeViewMenu.DIVIDER,
     { text = "Pull From Remote", command = "treeview:scm-pull" },
     { text = "View Changes Diff", command = "treeview:scm-global-diff" },
-    { text = "View Project Status", command = "treeview:scm-project-status" }
+    { text = "View Project Status", command = "treeview:scm-project-status" },
+    { text = "View Commits History", command = "treeview:scm-commits-history" }
   }
 )
 
@@ -64,6 +65,7 @@ TreeViewMenu:register(function()
     { text = "Remove from Staging", command = "treeview:scm-staging-remove" },
     { text = "Revert Changes", command = "treeview:scm-file-revert" },
     { text = "View Changes Diff", command = "treeview:scm-file-diff" },
+    { text = "View Commits History", command = "treeview:scm-commits-history" }
 })
 
 --------------------------------------------------------------------------------
@@ -85,6 +87,25 @@ command.add(
 
   ["treeview:scm-project-status"] = function()
     scm.open_project_status(TreeView.hovered_item.abs_filename)
+  end,
+
+  ["treeview:scm-commits-history"] = function()
+    scm.open_commit_history(TreeView.hovered_item.abs_filename)
+  end
+})
+
+command.add(
+  function()
+    return TreeView.hovered_item
+      and (
+        scm.is_scm_project(TreeView.hovered_item.abs_filename)
+        or
+        scm.get_path_backend(TreeView.hovered_item.abs_filename)
+      )
+  end, {
+
+  ["treeview:scm-commits-history"] = function()
+    scm.open_commit_history(TreeView.hovered_item.abs_filename)
   end
 })
 

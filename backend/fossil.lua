@@ -89,6 +89,35 @@ function Fossil:get_changes(directory, callback)
   end, directory, "changes", "--differ")
 end
 
+---@param path? string
+---@param directory string
+---@param callback plugins.scm.backend.ongetcommithistory
+function Fossil:get_commit_history(path, directory, callback)
+  local params = {
+    "timeline", "-n", "0", "-F", "\"'%a' %H '%d' %c\""
+  }
+  if path then
+    table.insert(params, "-p")
+    table.insert(params, common.relative_path(directory, path))
+  end
+  self:execute(function(proc)
+    ---@type plugins.scm.backend.commit[]
+    local history = {}
+    for _, line in self:get_process_lines(proc, "stdout") do
+      local author, hash, date, summary = line:match("('.-') (%S+) ('.-') (.*)")
+      if author then
+        table.insert(history, {
+          author = author:match("'(.*)'"),
+          hash = hash,
+          date = date:match("'(.*)'"),
+          summary = summary
+        })
+      end
+    end
+    callback(history)
+  end, directory, table.unpack(params))
+end
+
 ---@param id string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommit

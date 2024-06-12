@@ -20,7 +20,7 @@ local changes = require "plugins.scm.changes"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local StatusView = require "core.statusview"
-local ReadDoc = require "plugins.scm.readdoc"
+local ReadDocView = require "plugins.scm.readdocview"
 local Git = require "plugins.scm.backend.git"
 local Fossil = require "plugins.scm.backend.fossil"
 local MessageBox = require "widget.messagebox"
@@ -394,10 +394,7 @@ function scm.open_diff(project_dir)
     backend:get_diff(project_dir, function(diff)
       if diff and diff ~= "" then
         local title = "[CHANGES].diff"
-          ---@type plugins.scm.readdoc
-          local diffdoc = ReadDoc(title, title)
-          diffdoc:set_text(diff)
-          core.root_view:open_doc(diffdoc)
+        core.root_view:get_active_node_default():add_view(ReadDocView(title, diff))
       else
         core.warn("SCM: no changes detected.")
       end
@@ -415,10 +412,7 @@ function scm.open_path_diff(path)
     backend:get_file_diff(path, project_dir, function(diff)
       if diff and diff ~= "" then
         local title = string.format("%s.diff", path_rel)
-        ---@type plugins.scm.readdoc
-        local diffdoc = ReadDoc(title, title)
-        diffdoc:set_text(diff)
-        core.root_view:open_doc(diffdoc)
+        core.root_view:get_active_node_default():add_view(ReadDocView(title, diff))
       else
         local info = system.get_file_info(path)
         if info and info.type == "file" then
@@ -438,12 +432,51 @@ function scm.open_commit_diff(commit, project_dir)
     backend:get_commit_diff(commit, project_dir, function(diff)
       if diff and diff ~= "" then
         local title = string.format("[%s].diff", commit)
-        ---@type plugins.scm.readdoc
-        local diffdoc = ReadDoc(title, title)
-        diffdoc:set_text(diff)
-        core.root_view:open_doc(diffdoc)
+        core.root_view:get_active_node_default():add_view(ReadDocView(title, diff))
       else
         core.warn("SCM: could not retrieve the commit diff.")
+      end
+    end)
+  end
+end
+
+---@param path? string
+function scm.open_commit_history(path)
+  local project_dir = util.get_project_dir(path)
+  if not project_dir and PROJECTS[path] then
+    project_dir = path
+    path = nil
+  elseif not project_dir then
+    return
+  end
+  local backend = PROJECTS[project_dir]
+  if backend then
+    local path_rel = ""
+    if path then
+      path_rel = common.relative_path(project_dir, path)
+    else
+      path_rel = common.basename(project_dir)
+    end
+    backend:get_commit_history(path, project_dir, function(history)
+      if history and type(history) == "table" and #history > 0 then
+        -- local title = string.format("%s.diff", path_rel)
+        local HistoryResults = require "plugins.scm.historyresults"
+        local results = HistoryResults(project_dir, path)
+        core.root_view:get_active_node_default():add_view(results)
+        backend:yield()
+        for idx, commit in ipairs(history) do
+          results:add_commit(commit)
+          if idx % 100 == 0 then
+            core.redraw = true
+            results.list:resize_to_parent()
+            backend:yield()
+          end
+        end
+        core.redraw = true
+        results.list:resize_to_parent()
+        results:stop_searching()
+      else
+        core.warn("SCM: no history for '%s'.", path_rel)
       end
     end)
   end
@@ -457,10 +490,7 @@ function scm.open_project_status(project_dir)
     backend:get_status(project_dir, function(status)
       if status and status ~= "" then
         local title = "Project Status"
-          ---@type plugins.scm.readdoc
-          local doc = ReadDoc(title, title)
-          doc:set_text(status)
-          core.root_view:open_doc(doc)
+        core.root_view:get_active_node_default():add_view(ReadDocView(title, status))
       else
         core.warn("SCM: no status to report.")
       end
@@ -999,6 +1029,29 @@ command.add(
 
   ["scm:project-status"] = function(project_dir)
     scm.open_project_status(project_dir)
+  end
+})
+
+command.add(
+  function()
+    local valid = false
+    local path = nil
+    local av = core.active_view
+    if av and av.doc and av.doc.abs_filename then
+      local project_dir = util.get_project_dir(av.doc.abs_filename)
+      if project_dir and PROJECTS[project_dir] then
+        valid = true
+        path = av.doc.abs_filename
+      end
+    end
+    if not valid and PROJECTS[core.root_project().path] then
+      valid, path = true, core.root_project().path
+    end
+    return valid, path
+  end, {
+
+  ["scm:commits-history"] = function(path)
+    scm.open_commit_history(path)
   end
 })
 
