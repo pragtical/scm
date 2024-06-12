@@ -31,7 +31,7 @@ local Object = require "core.object"
 ---@field author string
 ---@field date string
 ---@field summary string
----@field message string
+---@field message? string
 
 ---@class plugins.scm.backend.blame
 ---@field commit string
@@ -42,6 +42,7 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetdiff fun(diff?:string, cached?:boolean)
 ---@alias plugins.scm.backend.ongetbranch fun(branch?:string, cached?:boolean)
 ---@alias plugins.scm.backend.ongetchanges fun(changes:plugins.scm.backend.filechange[], cached?:boolean)
+---@alias plugins.scm.backend.ongetcommithistory fun(changes?:plugins.scm.backend.commit[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommit fun(changes:plugins.scm.backend.commit, cached?:boolean)
 ---@alias plugins.scm.backend.ongetfilestatus fun(status?:plugins.scm.backend.filestatus, cached?:boolean)
 ---@alias plugins.scm.backend.ongetfileblame fun(list?:plugins.scm.backend.blame[], cached?:boolean)
@@ -274,6 +275,13 @@ function Backend:get_branch(directory, callback) callback(nil) end
 ---@param callback plugins.scm.backend.ongetchanges
 ---@diagnostic disable-next-line
 function Backend:get_changes(directory, callback) callback({}, false) end
+
+---Retrieve the commit history.
+---@param path? string If not nil get commit history of specific file or directory.
+---@param directory string Project directory
+---@param callback plugins.scm.backend.ongetcommithistory
+---@diagnostic disable-next-line
+function Backend:get_commit_history(path, directory, callback) callback(nil) end
 
 ---Retrieve the entire project unified diff.
 ---@param id string Hash of the commit

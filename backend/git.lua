@@ -254,6 +254,40 @@ function Git:get_changes(directory, callback)
   end)
 end
 
+---@param path? string
+---@param directory string
+---@param callback plugins.scm.backend.ongetcommithistory
+function Git:get_commit_history(path, directory, callback)
+  directory = git_repo_dir(self, directory, path)
+  local params = {
+    "log", "--oneline", "--no-decorate",
+    "--pretty=format:'%an' %H %ct %s"
+  }
+  if path then
+    table.insert(params, "--")
+    table.insert(params, common.relative_path(directory, path))
+  end
+  self:execute(function(proc)
+    ---@type plugins.scm.backend.commit[]
+    local history = {}
+    for idx, line in self:get_process_lines(proc, "stdout") do
+      local author, hash, date, summary = line:match("('.-') (%S+) (%S+) (.*)")
+      if author then
+        table.insert(history, {
+          author = author:match("'(.*)'"),
+          hash = hash,
+          date = os.date("%Y-%m-%d %I:%M %p", tonumber(date)),
+          summary = summary
+        })
+      end
+      if idx % 100 == 0 then
+        self:yield()
+      end
+    end
+    callback(history)
+  end, directory, table.unpack(params))
+end
+
 ---@param id string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommit
