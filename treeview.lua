@@ -100,7 +100,7 @@ command.add(
       and (
         scm.is_scm_project(TreeView.hovered_item.abs_filename)
         or
-        scm.get_path_backend(TreeView.hovered_item.abs_filename)
+        scm.get_path_backend(TreeView.hovered_item.abs_filename, false, true)
       )
   end, {
 

@@ -143,6 +143,22 @@ function Backend:clean_cache()
   self.next_clean = current_time + 20
 end
 
+---Mark a cached value as expired to force new retrieval.
+---@param name string
+---@param path? string
+function Backend:expire_cache(name, path)
+  for _, value in ipairs(self.cache) do
+    if not path then
+      if value.name == name then
+        value.expires = 0
+      end
+    elseif value.name == name and value.path == path then
+      value.expires = 0
+      break
+    end
+  end
+end
+
 ---Get a value that was previously stored on the cache.
 ---@param name string
 ---@param path string
