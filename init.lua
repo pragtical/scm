@@ -210,6 +210,11 @@ local function update_doc_status(path, nonblocking)
   local backend = PROJECTS[project_dir]
   if backend then
     if not nonblocking then backend:set_blocking_mode(true) end
+    backend:expire_cache("get_changes")
+    backend:expire_cache("get_file_status", path)
+    if backend:has_staging() then
+      backend:expire_cache("get_staged")
+    end
     backend:get_file_status(path, project_dir, function(status)
       if status and status ~= "" then
         local color
@@ -325,7 +330,7 @@ end
 function scm.get_path_changes(path)
   local project_dir = util.get_project_dir(path)
   if CHANGES[project_dir] and CHANGES[project_dir][path] then
-    return CHANGES[project_dir] and CHANGES[project_dir][path]
+    return CHANGES[project_dir][path]
   end
   return nil
 end
@@ -506,6 +511,7 @@ function scm.pull(project_dir)
   if backend then
     backend:pull(project_dir, function(success, errmsg)
       if success then
+        backend:expire_cache("get_changes")
         core.log("SCM: pulled latest changes for '%s'", project_dir)
       else
         core.error("SCM: failed to pull '%s', %s", project_dir, errmsg)
@@ -1038,8 +1044,7 @@ command.add(
     local path = nil
     local av = core.active_view
     if av and av.doc and av.doc.abs_filename then
-      local project_dir = util.get_project_dir(av.doc.abs_filename)
-      if project_dir and PROJECTS[project_dir] then
+      if scm.get_path_backend(av.doc.abs_filename, false, true) then
         valid = true
         path = av.doc.abs_filename
       end
