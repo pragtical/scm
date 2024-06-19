@@ -695,53 +695,73 @@ end
 ---Update the SCM status of all open projects.
 function scm.update()
   for project_dir, project_backend in pairs(PROJECTS) do
-    project_backend:get_branch(project_dir, function(branch, cached)
-      if not cached then BRANCHES[project_dir] = branch end
+    local project_open = false
+    for _, project in ipairs(core.projects) do
+      if project.path == project_dir then
+        project_open = true
+        break
+      end
+    end
+    if not project_open then
+      BRANCHES[project_dir] = nil
+      STATS[project_dir] = nil
+      CHANGES[project_dir] = nil
+      rawset(PROJECTS, project_dir, nil)
+    else
+      project_backend:get_branch(project_dir, function(branch, cached)
+        if not cached then
+          BRANCHES[project_dir] = branch
+          project_backend:yield()
+        end
 
-      project_backend:get_stats(project_dir, function(stats, cached)
-        if not cached then STATS[project_dir] = stats end
-
-        project_backend:get_changes(project_dir, function(filechanges, cached)
-          if cached then return end
-          local changed_files = {}
-          for i, change in ipairs(filechanges) do
-            local color = style.modified
-            if change.status == "added" then
-              color = style.good
-            elseif change.status == "edited" then
-              color = style.warn
-            elseif change.status == "renamed" then
-              color = style.warn
-            elseif change.status == "deleted" then
-              color = style.error
-            elseif change.status == "untracked" then
-              color = style.dim
-            end
-            change.color = color
-            local path = ""
-            if change.new_path then
-              change.text = common.basename(change.path)
-                .. " -> "
-                .. common.basename(change.new_path)
-              changed_files[change.new_path] = change
-              path = common.dirname(change.new_path)
-            else
-              changed_files[change.path] = change
-              path = common.dirname(change.path)
-            end
-            while path do
-              if #path < #project_dir then break end
-              changed_files[path] = { color = style.modified }
-              path = common.dirname(path)
-            end
-            if i % 10 == 0 then
-              coroutine.yield()
-            end
+        project_backend:get_stats(project_dir, function(stats, cached)
+          if not cached then
+            STATS[project_dir] = stats
+            project_backend:yield()
           end
-          CHANGES[project_dir] = changed_files
+
+          project_backend:get_changes(project_dir, function(filechanges, cached)
+            if cached then return end
+            local changed_files = {}
+            for i, change in ipairs(filechanges) do
+              local color = style.modified
+              if change.status == "added" then
+                color = style.good
+              elseif change.status == "edited" then
+                color = style.warn
+              elseif change.status == "renamed" then
+                color = style.warn
+              elseif change.status == "deleted" then
+                color = style.error
+              elseif change.status == "untracked" then
+                color = style.dim
+              end
+              change.color = color
+              local path = ""
+              if change.new_path then
+                change.text = common.basename(change.path)
+                  .. " -> "
+                  .. common.basename(change.new_path)
+                changed_files[change.new_path] = change
+                path = common.dirname(change.new_path)
+              else
+                changed_files[change.path] = change
+                path = common.dirname(change.path)
+              end
+              while path do
+                if #path < #project_dir then break end
+                changed_files[path] = { color = style.modified }
+                path = common.dirname(path)
+              end
+              if i % 10 == 0 then
+                project_backend:yield()
+              end
+            end
+            CHANGES[project_dir] = changed_files
+          end)
         end)
       end)
-    end)
+    end
   end
 end
 
