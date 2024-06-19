@@ -18,7 +18,7 @@ local function git_toplevel_path(self, path)
     path = git_command:read("*a")
     git_command:close()
   end
-  return path:gsub("%s+$", "")
+  return common.normalize_path(path:gsub("%s+$", ""))
 end
 
 ---Similar to git_toplevel_path() but with a base dir and file path
@@ -126,7 +126,7 @@ function Git:get_staged(directory, callback)
     for idx, line in self:get_process_lines(proc, "stdout") do
       if line ~= "" then
         local trimmed_file = line:gsub("^%s+", ""):gsub("%s+$", "")
-        staged[trimmed_file] = true
+        staged[common.normalize_path(trimmed_file)] = true
       end
       if idx % 50 == 0 then
         self:yield()
@@ -186,8 +186,8 @@ local function get_changes(self, directory, changes, callback)
             table.insert(changes, {
               status = status,
               staged = staged_files[path] or nil,
-              path = directory .. PATHSEP .. path,
-              new_path = new_path and (directory .. PATHSEP .. new_path) or nil
+              path = common.normalize_path(directory .. PATHSEP .. path),
+              new_path = new_path and common.normalize_path(directory .. PATHSEP .. new_path) or nil
             })
             added[path] = true
           end
@@ -220,7 +220,7 @@ function Git:get_changes(directory, callback)
         local submodule = line:match("%S+%s+(.+)")
         if submodule then
           submodule = submodule:match("^'(.+)'$")
-          local submodule_path = directory .. PATHSEP .. submodule
+          local submodule_path = common.normalize_path(directory .. PATHSEP .. submodule)
           local submodule_info = system.get_file_info(submodule_path)
           if
             submodule ~= ""
@@ -232,7 +232,7 @@ function Git:get_changes(directory, callback)
         end
       end
       for idx, submodule in ipairs(submodules) do
-        local submodule_path = directory .. PATHSEP .. submodule
+        local submodule_path = common.normalize_path(directory .. PATHSEP .. submodule)
         get_changes(self, submodule_path, changes, function()
           mod_changes_done[idx] = true
         end)

@@ -49,7 +49,7 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetchanges
 function Fossil:get_changes(directory, callback)
-  directory = directory:gsub("[/\\]$", "/")
+  directory = directory:gsub("[/\\]$", "")
   local cached = self:get_from_cache("get_changes", directory)
   if cached then callback(cached, true) return end
   self:execute(function(proc)
