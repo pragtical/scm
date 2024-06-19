@@ -265,7 +265,7 @@ function Fossil:get_stats(directory, callback)
     inserts = tonumber(i) or 0
     deletes = tonumber(d) or 0
     local stats = {inserts = inserts, deletes = deletes}
-    self:add_to_cache("get_stats", stats, directory, 5)
+    self:add_to_cache("get_stats", stats, directory)
     callback(stats)
   end, directory, "diff", "--numstat")
 end
