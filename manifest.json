@@ -4,7 +4,7 @@
       "id": "scm",
       "name": "Source Control Management",
       "description": "Extensible source control management plugin with git and fossil backends.",
-      "version": "0.4.2",
+      "version": "0.4.3",
       "mod_version": "3.1",
       "dependencies": {
         "language_diff": { "version": ">=0.1" }
