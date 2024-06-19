@@ -140,6 +140,8 @@ end
 ---@param callback plugins.scm.backend.ongetbranch
 function Git:get_branch(directory, callback)
   directory = git_repo_dir(self, directory)
+  local cached = self:get_from_cache("get_branch", directory)
+  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local branch = nil
     for idx, line in self:get_process_lines(proc, "stdout") do
@@ -152,6 +154,7 @@ function Git:get_branch(directory, callback)
         self:yield()
       end
     end
+    self:add_to_cache("get_branch", branch, directory)
     callback(branch)
   end, directory, "--no-optional-locks", "rev-parse", "--abbrev-ref", "HEAD")
 end
@@ -430,6 +433,8 @@ end
 ---@param callback plugins.scm.backend.ongetstats
 function Git:get_stats(directory, callback)
   directory = git_repo_dir(self, directory)
+  local cached = self:get_from_cache("get_stats", directory)
+  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local inserts = 0
     local deletes = 0
@@ -443,7 +448,9 @@ function Git:get_stats(directory, callback)
         self:yield()
       end
     end
-    callback({inserts = inserts, deletes = deletes})
+    local stats = {inserts = inserts, deletes = deletes}
+    self:add_to_cache("get_stats", stats, directory)
+    callback(stats)
   end, directory, "--no-optional-locks", "diff", "--numstat")
 end
 
