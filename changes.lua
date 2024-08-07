@@ -5,7 +5,7 @@ local changes = {}
 ---@return table<integer, string>
 function changes.parse(diff)
   local deletes, inserts = {}, {}
-  local dstart, deletions, astart, additions = 0, 0, 0, 0
+  local dstart, deletions, astart, acount, additions = 0, 0, 0, 0, 0
   for line in diff:gmatch("[^\n]+") do
     if
       (astart == 0 and dstart == 0)
@@ -28,12 +28,18 @@ function changes.parse(diff)
       local type = line:match("^([%+%-%s])")
       if type then
         if dstart > 0 and (type == "-" or type:match("%s")) then
-          if type == "-" then deletes[dstart] = "deletion" end
+          if type == "-" then
+            deletes[dstart + acount] = "deletion"
+            acount = acount - 1
+          end
           dstart = dstart + 1
           if dstart >= deletions then dstart = 0 end
         end
         if astart > 0 and (type == "+" or type:match("%s")) then
-          if type == "+" then inserts[astart] = "addition" end
+          if type == "+" then
+            inserts[astart] = "addition"
+            acount = acount + 1
+          end
           astart = astart + 1
           if astart >= additions then astart = 0 end
         end
