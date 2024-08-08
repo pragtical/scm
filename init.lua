@@ -1186,7 +1186,7 @@ command.add(
       local backend = scm.get_path_backend(path)
       if backend and backend:has_staging() then
         if status == "edited" and not scm.is_staged(path) then
-          return true
+          return true, doc
         end
       elseif backend then
         return scm.get_path_backend(doc.abs_filename, true, true), doc
