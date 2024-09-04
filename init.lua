@@ -19,6 +19,7 @@ local util = require "plugins.scm.util"
 local changes = require "plugins.scm.changes"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
+local DirWatch = require "core.dirwatch"
 local StatusView = require "core.statusview"
 local ReadDocView = require "plugins.scm.readdocview"
 local Git = require "plugins.scm.backend.git"
@@ -765,15 +766,105 @@ function scm.update()
   end
 end
 
+---Update current branch of all open projects.
+function scm.update_branch()
+  for project_dir, project_backend in pairs(PROJECTS) do
+    local project_open = false
+    for _, project in ipairs(core.projects) do
+      if project.path == project_dir then
+        project_open = true
+        break
+      end
+    end
+    if not project_open then
+      return
+    else
+      project_backend:get_branch(project_dir, function(branch, cached)
+        if not cached then
+          BRANCHES[project_dir] = branch
+          project_backend:yield()
+        end
+      end)
+    end
+  end
+end
+
 --------------------------------------------------------------------------------
 -- Keep the project branch, changes and stats updated
 --------------------------------------------------------------------------------
+local perform_update_count = 0
+local function perform_update()
+  if perform_update_count == 0 then
+    perform_update_count = 1
+    core.add_thread(function()
+      coroutine.yield()
+      while perform_update_count > 0 do
+        scm.update()
+        coroutine.yield(1)
+        perform_update_count = perform_update_count - 1
+      end
+    end)
+  else
+    perform_update_count = perform_update_count + 1
+  end
+end
+
+perform_update() -- perform update on startup
+
 core.add_thread(function()
   while true do
-    scm.update()
-    coroutine.yield(1)
+    scm.update_branch()
+    coroutine.yield(3)
   end
 end)
+
+local dirwatch_check = DirWatch.check
+function DirWatch:check(...)
+  local has_change = dirwatch_check(self, ...)
+  if has_change then perform_update() end
+  return has_change
+end
+
+local dirwatch_watch = DirWatch.watch
+function DirWatch:watch(...)
+  local retval = dirwatch_watch(self, ...)
+  perform_update()
+  return retval
+end
+
+local dirwatch_unwatch = DirWatch.unwatch
+function DirWatch:unwatch(...)
+  local retval = dirwatch_unwatch(self, ...)
+  perform_update()
+  return retval
+end
+
+local core_add_project = core.add_project
+function core.add_project(project)
+  project = core_add_project(project)
+  perform_update()
+  return project
+end
+
+local core_remove_project = core.remove_project
+function core.remove_project(project, force)
+  project = core_remove_project(project, force)
+  perform_update()
+  return project
+end
+
+local core_set_project = core.set_project
+function core.set_project(project)
+  project = core_set_project(project)
+  perform_update()
+  return project
+end
+
+local core_open_project = core.open_project
+function core.open_project(project)
+  core_open_project(project)
+  perform_update()
+end
 
 --------------------------------------------------------------------------------
 -- Override Doc to register diff changes and blame history
