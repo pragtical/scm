@@ -1,5 +1,6 @@
 local core = require "core"
 local util = require "plugins.scm.util"
+local DirWatch = require "core.dirwatch"
 local Object = require "core.object"
 
 ---@alias plugins.scm.backend.filestatus
@@ -68,6 +69,7 @@ function Backend:new(name, command)
   self.cache = {}
   self.next_clean = os.time() + 20
   self.blocking = false
+  self.watch = DirWatch()
   self:set_command(command)
 end
 
@@ -87,7 +89,11 @@ end
 ---@param wait? number
 function Backend:yield(wait)
   if not self.blocking then
-    coroutine.yield(wait)
+    local co, is_main = coroutine.running()
+    -- only yield if we are inside a coroutine
+    if co and not is_main then
+      coroutine.yield(wait)
+    end
   end
 end
 
@@ -210,11 +216,13 @@ function Backend:get_process_output(proc, from)
   local output = ""
   local read_size = 1024 * 10
   local read = proc[from](proc, read_size)
+  local iterations = 0
   repeat
     if read ~= nil and read ~= "" then
       output = output .. read
     end
-    self:yield(0.01)
+    iterations = iterations + 1
+    if iterations % 10 == 0 then self:yield() end
     read = proc[from](proc, read_size)
   until (read == nil or read == "") and not proc:running()
   return output
@@ -255,6 +263,16 @@ end
 ---@return boolean detected
 ---@diagnostic disable-next-line
 function Backend:detect(directory) return false end
+
+---Custom project watching to perform neccesary updates.
+---@param directory string Project directory
+---@diagnostic disable-next-line
+function Backend:watch_project(directory) end
+
+---Unregister project watching.
+---@param directory string Project directory
+---@diagnostic disable-next-line
+function Backend:unwatch_project(directory) end
 
 ---Report if the backend has a staging area.
 ---@return boolean

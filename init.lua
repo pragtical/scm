@@ -143,10 +143,23 @@ setmetatable(PROJECTS, {
             backend:get_stats(k, function(stats) STATS[k] = stats end)
           end)
           if backend.name == "Fossil" then
-            table.insert(config.ignore_files, "%-shm$")
-            table.insert(config.ignore_files, "%-wal$")
+            local found = false
+            for _, rule in pairs(config.ignore_files) do
+              if string.find(rule, "%-shm$", 1, true) then
+                found = true
+                break
+              end
+            end
+            if not found then
+              table.insert(config.ignore_files, "%-shm$")
+              table.insert(config.ignore_files, "%-wal$")
+              for _, project in ipairs(core.projects) do
+                project:compile_ignore_files()
+              end
+            end
           end
           rawset(t, k, v)
+          backend:watch_project(k)
         end
       end
     end
@@ -211,11 +224,6 @@ local function update_doc_status(path, nonblocking)
   local backend = PROJECTS[project_dir]
   if backend then
     if not nonblocking then backend:set_blocking_mode(true) end
-    backend:expire_cache("get_changes")
-    backend:expire_cache("get_file_status", path)
-    if backend:has_staging() then
-      backend:expire_cache("get_staged")
-    end
     backend:get_file_status(path, project_dir, function(status)
       if status and status ~= "" then
         local color
@@ -512,7 +520,6 @@ function scm.pull(project_dir)
   if backend then
     backend:pull(project_dir, function(success, errmsg)
       if success then
-        backend:expire_cache("get_changes")
         core.log("SCM: pulled latest changes for '%s'", project_dir)
       else
         core.error("SCM: failed to pull '%s', %s", project_dir, errmsg)
@@ -693,6 +700,8 @@ function scm.previous_change(doc)
   end
 end
 
+local scm_update_running = false
+
 ---Update the SCM status of all open projects.
 function scm.update()
   for project_dir, project_backend in pairs(PROJECTS) do
@@ -708,7 +717,9 @@ function scm.update()
       STATS[project_dir] = nil
       CHANGES[project_dir] = nil
       rawset(PROJECTS, project_dir, nil)
+      project_backend:unwatch_project(project_dir)
     else
+      scm_update_running = true
       project_backend:get_branch(project_dir, function(branch, cached)
         if not cached then
           BRANCHES[project_dir] = branch
@@ -759,31 +770,9 @@ function scm.update()
               end
             end
             CHANGES[project_dir] = changed_files
+            scm_update_running = false
           end)
         end)
-      end)
-    end
-  end
-end
-
----Update current branch of all open projects.
-function scm.update_branch()
-  for project_dir, project_backend in pairs(PROJECTS) do
-    local project_open = false
-    for _, project in ipairs(core.projects) do
-      if project.path == project_dir then
-        project_open = true
-        break
-      end
-    end
-    if not project_open then
-      return
-    else
-      project_backend:get_branch(project_dir, function(branch, cached)
-        if not cached then
-          BRANCHES[project_dir] = branch
-          project_backend:yield()
-        end
       end)
     end
   end
@@ -792,88 +781,78 @@ end
 --------------------------------------------------------------------------------
 -- Keep the project branch, changes and stats updated
 --------------------------------------------------------------------------------
-local perform_update_count = 0
-local function perform_update()
-  if perform_update_count == 0 then
-    perform_update_count = 1
-    core.add_thread(function()
-      coroutine.yield()
-      while perform_update_count > 0 do
-        scm.update()
-        coroutine.yield(1)
-        perform_update_count = perform_update_count - 1
-      end
-    end)
-  else
-    perform_update_count = perform_update_count + 1
+local queue_update_count = 0
+local queue_update_last_time = 0
+local function queue_update()
+  local now = system.get_time()
+  if now - queue_update_last_time >= 1 then
+    queue_update_count = queue_update_count + 1
+    queue_update_last_time = now
   end
 end
 
-perform_update() -- perform update on startup
+queue_update() -- perform update on startup
 
 core.add_thread(function()
+  coroutine.yield(1) -- give startup a bit of time
   while true do
-    scm.update_branch()
-    coroutine.yield(3)
+    for _, backend in pairs(BACKENDS) do
+      backend.watch:check(function(file)
+        queue_update()
+      end)
+    end
+    if not scm_update_running and queue_update_count > 0 then
+      scm.update()
+      queue_update_count = queue_update_count - 1
+    end
+    coroutine.yield(1)
   end
 end)
 
 local dirwatch_check = DirWatch.check
 function DirWatch:check(...)
   local has_change = dirwatch_check(self, ...)
-  if has_change then perform_update() end
+  if has_change then queue_update() end
   return has_change
-end
-
-local dirwatch_watch = DirWatch.watch
-function DirWatch:watch(...)
-  local retval = dirwatch_watch(self, ...)
-  perform_update()
-  return retval
-end
-
-local dirwatch_unwatch = DirWatch.unwatch
-function DirWatch:unwatch(...)
-  local retval = dirwatch_unwatch(self, ...)
-  perform_update()
-  return retval
 end
 
 local core_add_project = core.add_project
 function core.add_project(project)
   project = core_add_project(project)
-  perform_update()
+  queue_update()
   return project
 end
 
 local core_remove_project = core.remove_project
 function core.remove_project(project, force)
   project = core_remove_project(project, force)
-  perform_update()
+  queue_update()
   return project
 end
 
 local core_set_project = core.set_project
 function core.set_project(project)
   project = core_set_project(project)
-  perform_update()
+  queue_update()
   return project
 end
 
 local core_open_project = core.open_project
 function core.open_project(project)
   core_open_project(project)
-  perform_update()
+  queue_update()
 end
 
 --------------------------------------------------------------------------------
--- Override Doc to register diff changes and blame history
+-- Override Doc to register diff changes, blame history and file status
 --------------------------------------------------------------------------------
 local doc_save = Doc.save
 function Doc:save(...)
   doc_save(self, ...)
+  update_doc_status(self.abs_filename)
   update_doc_diff(self)
   update_doc_blame(self)
+  queue_update()
 end
 
 local doc_new = Doc.new
@@ -881,6 +860,7 @@ function Doc:new(...)
   doc_new(self, ...)
   update_doc_diff(self)
   update_doc_blame(self)
+  queue_update()
 end
 
 local doc_load = Doc.load
@@ -888,6 +868,7 @@ function Doc:load(...)
   doc_load(self, ...)
   update_doc_diff(self)
   update_doc_blame(self)
+  queue_update()
 end
 
 local doc_raw_insert = Doc.raw_insert
