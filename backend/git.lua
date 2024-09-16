@@ -62,6 +62,17 @@ function Git:detect(directory)
   return false
 end
 
+---@param directory string
+---@param callback function
+function Git:watch_project(directory, callback)
+  self.watch:watch(directory .. PATHSEP .. ".git", callback)
+end
+
+---@param directory string
+function Git:unwatch_project(directory)
+  self.watch:unwatch(directory .. PATHSEP .. ".git")
+end
+
 ---@return boolean
 function Git:has_staging()
   return true
@@ -118,8 +129,6 @@ end
 function Git:get_staged(directory, callback)
   directory = directory:gsub("[/\\]$", "")
   directory = git_repo_dir(self, directory)
-  local cached = self:get_from_cache("get_staged", directory)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     ---@type table<string,boolean>
     local staged = {}
@@ -132,7 +141,6 @@ function Git:get_staged(directory, callback)
         self:yield()
       end
     end
-    self:add_to_cache("get_staged", staged, directory)
     callback(staged)
   end, directory, "--no-optional-locks", "diff", "--name-only", "--cached")
 end
@@ -140,8 +148,6 @@ end
 ---@param callback plugins.scm.backend.ongetbranch
 function Git:get_branch(directory, callback)
   directory = git_repo_dir(self, directory)
-  local cached = self:get_from_cache("get_branch", directory)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local branch = nil
     for idx, line in self:get_process_lines(proc, "stdout") do
@@ -154,7 +160,6 @@ function Git:get_branch(directory, callback)
         self:yield()
       end
     end
-    self:add_to_cache("get_branch", branch, directory)
     callback(branch)
   end, directory, "--no-optional-locks", "rev-parse", "--abbrev-ref", "HEAD")
 end
@@ -211,8 +216,6 @@ end
 function Git:get_changes(directory, callback)
   directory = directory:gsub("[/\\]$", "")
   directory = git_repo_dir(self, directory)
-  local cached = self:get_from_cache("get_changes", directory)
-  if cached then callback(cached, true) return end
   local changes = {}
   get_changes(self, directory, changes, function()
     -- get available submodule changes
@@ -251,7 +254,6 @@ function Git:get_changes(directory, callback)
         end
         self:yield()
       end
-      self:add_to_cache("get_changes", changes, directory)
       callback(changes)
     end, directory, "submodule", "foreach", "--recursive")
   end)
@@ -354,11 +356,8 @@ end
 ---@param callback plugins.scm.backend.ongetdiff
 function Git:get_file_diff(file, directory, callback)
   directory = git_repo_dir(self, directory, file)
-  local cached = self:get_from_cache("get_file_diff", file)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
-    self:add_to_cache("get_file_diff", diff, directory, 1)
     callback(diff)
   end, directory, "--no-optional-locks", "diff", common.relative_path(directory, file))
 end
@@ -368,8 +367,6 @@ end
 ---@param callback plugins.scm.backend.ongetfilestatus
 function Git:get_file_status(file, directory, callback)
   directory = git_repo_dir(self, directory, file)
-  local cached = self:get_from_cache("get_file_status", file)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local status = "unchanged"
     local output = self:get_process_output(proc, "stdout")
@@ -393,7 +390,6 @@ function Git:get_file_status(file, directory, callback)
       end
       self:yield()
     end
-    self:add_to_cache("get_file_status", status, file, 1)
     callback(status)
   end, directory, "--no-optional-locks", "status", "-s", common.relative_path(directory, file))
 end
@@ -403,8 +399,6 @@ end
 ---@param callback plugins.scm.backend.ongetfileblame
 function Git:get_file_blame(file, directory, callback)
   directory = git_repo_dir(self, directory, file)
-  local cached = self:get_from_cache("get_file_blame", file)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     ---@type plugins.scm.backend.blame[]
     local list = {}
@@ -425,7 +419,6 @@ function Git:get_file_blame(file, directory, callback)
         self:yield()
       end
     end
-    self:add_to_cache("get_file_blame", list, file, 10)
     callback(#list > 0 and list or nil)
   end, directory, "--no-optional-locks", "blame", common.relative_path(directory, file))
 end
@@ -433,8 +426,6 @@ end
 ---@param callback plugins.scm.backend.ongetstats
 function Git:get_stats(directory, callback)
   directory = git_repo_dir(self, directory)
-  local cached = self:get_from_cache("get_stats", directory)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local inserts = 0
     local deletes = 0
@@ -449,7 +440,6 @@ function Git:get_stats(directory, callback)
       end
     end
     local stats = {inserts = inserts, deletes = deletes}
-    self:add_to_cache("get_stats", stats, directory)
     callback(stats)
   end, directory, "--no-optional-locks", "diff", "--numstat")
 end

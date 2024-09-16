@@ -127,6 +127,10 @@ local STATS = {}
 ---@type table<string,table<string,plugins.scm.filechange>>
 local CHANGES = {}
 
+---Dummy function used when watching projects.
+---@type function
+local noop = function() end
+
 ---Opened projects SCM backends list
 ---@type table<string,plugins.scm.backend>
 local PROJECTS = {}
@@ -147,6 +151,7 @@ setmetatable(PROJECTS, {
             table.insert(config.ignore_files, "%-wal$")
           end
           rawset(t, k, v)
+          backend:watch_project(k, noop)
         end
       end
     end
@@ -708,6 +713,7 @@ function scm.update()
       STATS[project_dir] = nil
       CHANGES[project_dir] = nil
       rawset(PROJECTS, project_dir, nil)
+      project_backend:unwatch_project(project_dir)
     else
       project_backend:get_branch(project_dir, function(branch, cached)
         if not cached then
@@ -766,33 +772,11 @@ function scm.update()
   end
 end
 
----Update current branch of all open projects.
-function scm.update_branch()
-  for project_dir, project_backend in pairs(PROJECTS) do
-    local project_open = false
-    for _, project in ipairs(core.projects) do
-      if project.path == project_dir then
-        project_open = true
-        break
-      end
-    end
-    if not project_open then
-      return
-    else
-      project_backend:get_branch(project_dir, function(branch, cached)
-        if not cached then
-          BRANCHES[project_dir] = branch
-          project_backend:yield()
-        end
-      end)
-    end
-  end
-end
-
 --------------------------------------------------------------------------------
 -- Keep the project branch, changes and stats updated
 --------------------------------------------------------------------------------
 local perform_update_count = 0
+local perform_update_time = 0
 local function perform_update()
   if perform_update_count == 0 then
     perform_update_count = 1
@@ -804,19 +788,13 @@ local function perform_update()
         perform_update_count = perform_update_count - 1
       end
     end)
-  else
+    perform_update_time = system.get_time()
+  elseif system.get_time() - perform_update_time > 1 then
     perform_update_count = perform_update_count + 1
   end
 end
 
 perform_update() -- perform update on startup
-
-core.add_thread(function()
-  while true do
-    scm.update_branch()
-    coroutine.yield(3)
-  end
-end)
 
 local dirwatch_check = DirWatch.check
 function DirWatch:check(...)
@@ -874,6 +852,7 @@ function Doc:save(...)
   doc_save(self, ...)
   update_doc_diff(self)
   update_doc_blame(self)
+  perform_update()
 end
 
 local doc_new = Doc.new
@@ -881,6 +860,7 @@ function Doc:new(...)
   doc_new(self, ...)
   update_doc_diff(self)
   update_doc_blame(self)
+  perform_update()
 end
 
 local doc_load = Doc.load
@@ -888,6 +868,7 @@ function Doc:load(...)
   doc_load(self, ...)
   update_doc_diff(self)
   update_doc_blame(self)
+  perform_update()
 end
 
 local doc_raw_insert = Doc.raw_insert

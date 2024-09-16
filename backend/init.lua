@@ -1,5 +1,6 @@
 local core = require "core"
 local util = require "plugins.scm.util"
+local DirWatch = require "core.dirwatch"
 local Object = require "core.object"
 
 ---@alias plugins.scm.backend.filestatus
@@ -68,6 +69,7 @@ function Backend:new(name, command)
   self.cache = {}
   self.next_clean = os.time() + 20
   self.blocking = false
+  self.watch = DirWatch()
   self:set_command(command)
 end
 
@@ -255,6 +257,15 @@ end
 ---@return boolean detected
 ---@diagnostic disable-next-line
 function Backend:detect(directory) return false end
+
+---Custom project watching to perform neccesary updates.
+---@param directory string Project directory
+---@param callback function
+function Backend:watch_project(directory, callback) end
+
+---Unregister project watching.
+---@param directory string Project directory
+function Backend:unwatch_project(directory) end
 
 ---Report if the backend has a staging area.
 ---@return boolean

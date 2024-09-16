@@ -25,10 +25,19 @@ function Fossil:detect(directory)
   return false
 end
 
+---@param directory string
+---@param callback function
+function Fossil:watch_project(directory, callback)
+  self.watch:watch(directory .. PATHSEP .. ".fslckout", callback)
+end
+
+---@param directory string
+function Fossil:unwatch_project(directory)
+  self.watch:unwatch(directory .. PATHSEP .. ".fslckout")
+end
+
 ---@param callback plugins.scm.backend.ongetbranch
 function Fossil:get_branch(directory, callback)
-  local cached = self:get_from_cache("get_branch", directory)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local branch = nil
     for idx, line in self:get_process_lines(proc, "stdout") do
@@ -41,7 +50,6 @@ function Fossil:get_branch(directory, callback)
         self:yield()
       end
     end
-    self:add_to_cache("get_branch", branch, directory, 3)
     callback(branch)
   end, directory, "branch")
 end
@@ -50,8 +58,6 @@ end
 ---@param callback plugins.scm.backend.ongetchanges
 function Fossil:get_changes(directory, callback)
   directory = directory:gsub("[/\\]$", "")
-  local cached = self:get_from_cache("get_changes", directory)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     ---@type plugins.scm.backend.filechange[]
     local changes = {}
@@ -84,7 +90,6 @@ function Fossil:get_changes(directory, callback)
       self:yield()
       iterations = iterations + 1
     end
-    self:add_to_cache("get_changes", changes, directory)
     callback(changes)
   end, directory, "changes", "--differ")
 end
@@ -170,11 +175,8 @@ end
 ---@param file string
 ---@param callback plugins.scm.backend.ongetdiff
 function Fossil:get_file_diff(file, directory, callback)
-  local cached = self:get_from_cache("get_file_diff", file)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
-    self:add_to_cache("get_file_diff", diff, directory, 1)
     callback(diff)
   end, directory, "diff", common.relative_path(directory, file))
 end
@@ -183,8 +185,6 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetfilestatus
 function Fossil:get_file_status(file, directory, callback)
-  local cached = self:get_from_cache("get_file_status", file)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local status = "unchanged"
     local output = self:get_process_output(proc, "stdout")
@@ -210,7 +210,6 @@ function Fossil:get_file_status(file, directory, callback)
       end
       self:yield()
     end
-    self:add_to_cache("get_file_status", status, file, 1)
     callback(status)
   end, directory, "finfo", "-s", common.relative_path(directory, file))
 end
@@ -219,8 +218,6 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetfileblame
 function Fossil:get_file_blame(file, directory, callback)
-  local cached = self:get_from_cache("get_file_blame", file)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local list = {}
     for idx, line in self:get_process_lines(proc, "stdout") do
@@ -240,15 +237,12 @@ function Fossil:get_file_blame(file, directory, callback)
         self:yield()
       end
     end
-    self:add_to_cache("get_file_blame", list, file, 10)
     callback(#list > 0 and list or nil)
   end, directory, "blame", common.relative_path(directory, file))
 end
 
 ---@param callback plugins.scm.backend.ongetstats
 function Fossil:get_stats(directory, callback)
-  local cached = self:get_from_cache("get_stats", directory)
-  if cached then callback(cached, true) return end
   self:execute(function(proc)
     local inserts = 0
     local deletes = 0
@@ -265,7 +259,6 @@ function Fossil:get_stats(directory, callback)
     inserts = tonumber(i) or 0
     deletes = tonumber(d) or 0
     local stats = {inserts = inserts, deletes = deletes}
-    self:add_to_cache("get_stats", stats, directory)
     callback(stats)
   end, directory, "diff", "--numstat")
 end
