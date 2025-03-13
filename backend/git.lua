@@ -53,6 +53,7 @@ function Git:new()
     ".git",
     -- commit changes
     ".git" .. PATHSEP .. "objects",
+    ".git" .. PATHSEP .. "COMMIT_EDITMSG",
     -- pushes
     ".git" .. PATHSEP .. "refs" .. PATHSEP .. "remotes"
   }
@@ -74,14 +75,14 @@ end
 ---@param directory string
 function Git:watch_project(directory)
   for _, dir in ipairs(self.watch_dirs) do
-    self.watch:watch(dir)
+    self.watch:watch(directory .. PATHSEP .. dir)
   end
 end
 
 ---@param directory string
 function Git:unwatch_project(directory)
   for _, dir in ipairs(self.watch_dirs) do
-    self.watch:unwatch(dir)
+    self.watch:unwatch(directory .. PATHSEP .. dir)
   end
 end
 
