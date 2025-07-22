@@ -910,66 +910,112 @@ end
 local DIFF_WIDTH = 3
 local docview_draw_line_gutter = DocView.draw_line_gutter
 local docview_get_gutter_width = DocView.get_gutter_width
-function DocView:draw_line_gutter(line, x, y, width)
-  if not self.doc or not self.doc.scm_diff or not config.plugins.smc.highlighter then
-    return docview_draw_line_gutter(self, line, x, y, width)
-  end
 
-  local lh = self:get_line_height()
-  local gw, gpad = docview_get_gutter_width(self)
-  local diff_type = self.doc.scm_diff[line]
-
-  local align = config.plugins.smc.highlighter_alignment
-
-  if align == "right" then
-    docview_draw_line_gutter(self, line, x, y, gpad and gw - gpad or gw)
-  else
-    local tox = style.padding.x * DIFF_WIDTH / 12
-    docview_draw_line_gutter(self, line, x + tox, y, gpad and gw - gpad or gw)
-  end
-
-  if diff_type == nil then return end
-
-  local color = style.good
-  if diff_type == "deletion" then
-    color = style.error
-  elseif diff_type == "modification" then
-    color = style.warn
-  end
-
-  local colw = self:get_font():get_width(#self.doc.lines)
-
-  -- add margin in between highlight and text
-  if align == "right" then
-    if colw + style.padding.x * 2 >= gw then
-      x = x + style.padding.x * 1.5 + colw
-    else
-      x = x + gw - style.padding.x * 2 + (style.padding.x * DIFF_WIDTH / 12)
+-- check if newer pragtical and simplify logic
+if type(config.show_line_numbers) == "boolean" then
+  function DocView:draw_line_gutter(line, x, y, width)
+    if not self.doc or not self.doc.scm_diff or not config.plugins.smc.highlighter then
+      return docview_draw_line_gutter(self, line, x, y, width)
     end
-  else
-    local spacing = (style.padding.x * DIFF_WIDTH / 12)
-    if colw + style.padding.x * 2 >= gw then
-      x = x + gw + spacing - colw - gpad
-    else
-      x = x + math.max(gw, colw) - (colw) - math.min(colw, gw) - spacing
+
+    local lh = docview_draw_line_gutter(self, line, x, y, width)
+    local gw, gpad = docview_get_gutter_width(self)
+    local diff_type = self.doc.scm_diff[line]
+
+    local align = config.plugins.smc.highlighter_alignment
+
+    if diff_type == nil then return end
+
+    local color = style.good
+    if diff_type == "deletion" then
+      color = style.error
+    elseif diff_type == "modification" then
+      color = style.warn
     end
+
+    if align == "right" then
+      x = x + gw - style.padding.x / 2
+    else
+      if config.show_line_numbers then
+        local colw = self:get_font():get_width(#self.doc.lines)
+        x = x + gw - colw - gpad
+      else
+        local lx = self:get_line_screen_position(line, 1)
+        x = lx - style.padding.x
+      end
+    end
+
+    local yoffset = self:get_line_text_y_offset()
+    if diff_type ~= "deletion" then
+      renderer.draw_rect(x, y + yoffset, DIFF_WIDTH * SCALE, self:get_line_height(), color)
+      return
+    end
+    if align == "right" then x = x - style.padding.x / 2 end
+    renderer.draw_rect(x, y + yoffset, DIFF_WIDTH * SCALE * 4, 2, color)
+    return lh
+  end
+else
+  function DocView:draw_line_gutter(line, x, y, width)
+    if not self.doc or not self.doc.scm_diff or not config.plugins.smc.highlighter then
+      return docview_draw_line_gutter(self, line, x, y, width)
+    end
+
+    local lh = self:get_line_height()
+    local gw, gpad = docview_get_gutter_width(self)
+    local diff_type = self.doc.scm_diff[line]
+
+    local align = config.plugins.smc.highlighter_alignment
+
+    if align == "right" then
+      docview_draw_line_gutter(self, line, x, y, gpad and gw - gpad or gw)
+    else
+      local tox = style.padding.x * DIFF_WIDTH / 12
+      docview_draw_line_gutter(self, line, x + tox, y, gpad and gw - gpad or gw)
+    end
+
+    if diff_type == nil then return end
+
+    local color = style.good
+    if diff_type == "deletion" then
+      color = style.error
+    elseif diff_type == "modification" then
+      color = style.warn
+    end
+
+    local colw = self:get_font():get_width(#self.doc.lines)
+
+    -- add margin in between highlight and text
+    if align == "right" then
+      if colw + style.padding.x * 2 >= gw then
+        x = x + style.padding.x * 1.5 + colw
+      else
+        x = x + gw - style.padding.x * 2 + (style.padding.x * DIFF_WIDTH / 12)
+      end
+    else
+      local spacing = (style.padding.x * DIFF_WIDTH / 12)
+      if colw + style.padding.x * 2 >= gw then
+        x = x + gw + spacing - colw - gpad
+      else
+        x = x + math.max(gw, colw) - (colw) - math.min(colw, gw) - spacing
+      end
+    end
+
+    local yoffset = self:get_line_text_y_offset()
+    if diff_type ~= "deletion" then
+      renderer.draw_rect(x, y + yoffset, DIFF_WIDTH, self:get_line_height(), color)
+      return
+    end
+    renderer.draw_rect(x - DIFF_WIDTH * 2, y + yoffset, DIFF_WIDTH * 4, 2, color)
+    return lh
   end
 
-  local yoffset = self:get_line_text_y_offset()
-  if diff_type ~= "deletion" then
-    renderer.draw_rect(x, y + yoffset, DIFF_WIDTH, self:get_line_height(), color)
-    return
-  end
-  renderer.draw_rect(x - DIFF_WIDTH * 2, y + yoffset, DIFF_WIDTH * 4, 2, color)
-  return lh
-end
-
-function DocView:get_gutter_width()
-  if not self.doc or not self.doc.scm_diff or not config.plugins.smc.highlighter then
+  function DocView:get_gutter_width()
+    if not self.doc or not self.doc.scm_diff or not config.plugins.smc.highlighter then
+      return docview_get_gutter_width(self)
+    end
     return docview_get_gutter_width(self)
+      + style.padding.x * DIFF_WIDTH / 12
   end
-  return docview_get_gutter_width(self)
-    + style.padding.x * DIFF_WIDTH / 12
 end
 
 local function draw_tooltip(text, x, y)
