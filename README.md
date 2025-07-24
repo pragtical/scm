@@ -49,6 +49,8 @@ it will be associated to the project for subsequente use.
 * View the commits history list for the entire project and also
   for a specific file or directory path.
   - View the diff of any commit on the list
+  - Copy the hash
+  - If a file compare the commit with current file.
 
 ## TODO
 

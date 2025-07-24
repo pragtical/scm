@@ -27,6 +27,7 @@ local Object = require "core.object"
 ---@field expires number
 ---@field value any
 
+---Representation of a commit data.
 ---@class plugins.scm.backend.commit
 ---@field hash string
 ---@field author string
@@ -41,6 +42,7 @@ local Object = require "core.object"
 
 ---@alias plugins.scm.backend.onexecute fun(proc?:process, errmsg?:string, errcode?:number)
 ---@alias plugins.scm.backend.ongetdiff fun(diff?:string, cached?:boolean)
+---@alias plugins.scm.backend.ongetfile fun(content?:string)
 ---@alias plugins.scm.backend.ongetbranch fun(branch?:string, cached?:boolean)
 ---@alias plugins.scm.backend.ongetchanges fun(changes:plugins.scm.backend.filechange[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommithistory fun(changes?:plugins.scm.backend.commit[], cached?:boolean)
@@ -330,6 +332,14 @@ function Backend:get_commit_info(id, directory, callback) callback(nil) end
 ---@param callback plugins.scm.backend.ongetdiff
 ---@diagnostic disable-next-line
 function Backend:get_commit_diff(id, directory, callback) callback(nil) end
+
+---Retrieve the contents of a file for a given commit.
+---@param id? string Hash of the commit
+---@param directory string Project directory
+---@param file string File associated with the given commit
+---@param callback plugins.scm.backend.ongetfile
+---@diagnostic disable-next-line
+function Backend:get_commit_file(id, directory, file, callback) callback(nil) end
 
 ---Retrieve the entire project unified diff.
 ---@param directory string Project directory

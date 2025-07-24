@@ -355,6 +355,24 @@ function Git:get_commit_diff(id, directory, callback)
   end, directory, "--no-optional-locks", "show", "-U", id)
 end
 
+---@param id? string
+---@param directory string
+---@param file string
+---@param callback plugins.scm.backend.ongetfile
+---@diagnostic disable-next-line
+function Git:get_commit_file(id, directory, file, callback)
+  directory = git_repo_dir(directory)
+  self:execute(
+    function(proc)
+      local content = self:get_process_output(proc, "stdout")
+      callback(content)
+    end,
+    directory,
+    "--no-optional-locks", "show",
+    string.format('%s:%s', id or "HEAD", common.relative_path(directory, file))
+  )
+end
+
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
 function Git:get_diff(directory, callback)

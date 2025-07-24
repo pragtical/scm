@@ -25,6 +25,10 @@ local ReadDocView = require "plugins.scm.readdocview"
 local Git = require "plugins.scm.backend.git"
 local Fossil = require "plugins.scm.backend.fossil"
 local MessageBox = require "widget.messagebox"
+local diffview_loaded, diffview = pcall(require, "plugins.diffview")
+
+---@cast diffview_loaded boolean
+---@cast diffview plugins.diffview
 
 ---Backends shipped with the plugin.
 ---@type table<string,plugins.scm.backend>
@@ -108,6 +112,7 @@ BACKENDS.Fossil:set_command(config.plugins.smc.fossil_path)
 ---@field color renderer.color?
 ---@field text string?
 
+---The scm plugin interface.
 ---@class plugins.scm
 local scm = {}
 
@@ -434,6 +439,29 @@ function scm.open_path_diff(path)
         else
           core.warn("SCM: seems like the path only contains untracked files.")
         end
+      end
+    end)
+  end
+end
+
+function scm.open_commit_file(commit, file)
+  if not diffview_loaded then
+    core.warn("SCM: this functionality needs Pragtical with diff support.")
+    return
+  end
+  local project_dir = util.get_project_dir(file)
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:get_commit_file(commit, project_dir, file, function(content)
+      if content and content ~= "" then
+        diffview.string_to_file(
+          content, file, (commit or "HEAD").."-"..common.basename(file)
+        )
+      else
+        core.warn(
+          "SCM: file '%s' not found in choosen commit.",
+          common.relative_path(project_dir, file)
+        )
       end
     end)
   end
@@ -904,6 +932,14 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
   self.scm_diff = diffs
 end
 
+local doc_clear_undo_redo = Doc.clear_undo_redo
+if doc_clear_undo_redo then
+  function Doc:clear_undo_redo()
+    doc_clear_undo_redo(self)
+    self.scm_diff = nil
+  end
+end
+
 --------------------------------------------------------------------------------
 -- Override DocView to draw changes on gutter and blame tooltip
 --------------------------------------------------------------------------------
@@ -1329,6 +1365,10 @@ command.add(
 
   ["scm:file-diff"] = function(doc)
     scm.open_path_diff(doc.abs_filename)
+  end,
+
+  ["scm:compare-with-head"] = function(doc)
+    scm.open_commit_file(nil, doc.abs_filename)
   end
 })
 

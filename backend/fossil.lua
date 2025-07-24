@@ -162,6 +162,23 @@ function Fossil:get_commit_diff(id, directory, callback)
   end, directory, "diff", "--unified", "-ci", id)
 end
 
+---@param id? string
+---@param directory string
+---@param file string
+---@param callback plugins.scm.backend.ongetfile
+---@diagnostic disable-next-line
+function Fossil:get_commit_file(id, directory, file, callback)
+  local args = { common.relative_path(directory, file) }
+  if id then table.insert(args, "-r") table.insert(args, id) end
+  self:execute(
+    function(proc)
+      local content = self:get_process_output(proc, "stdout")
+      callback(content)
+    end,
+    directory, "cat", table.unpack(args)
+  )
+end
+
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
 function Fossil:get_diff(directory, callback)

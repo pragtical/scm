@@ -64,6 +64,7 @@ TreeViewMenu:register(function()
     { text = "Add to Staging", command = "treeview:scm-staging-add" },
     { text = "Remove from Staging", command = "treeview:scm-staging-remove" },
     { text = "Revert Changes", command = "treeview:scm-file-revert" },
+    { text = "Compare With Head", command = "treeview:scm-compare-with-head" },
     { text = "View Changes Diff", command = "treeview:scm-file-diff" },
     { text = "View Commits History", command = "treeview:scm-commits-history" }
 })
@@ -203,6 +204,10 @@ command.add(
 
   ["treeview:scm-file-diff"] = function()
     scm.open_path_diff(TreeView.hovered_item.abs_filename)
+  end,
+
+  ["treeview:scm-compare-with-head"] = function()
+    scm.open_commit_file(nil, TreeView.hovered_item.abs_filename)
   end
 })
 
