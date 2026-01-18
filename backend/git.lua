@@ -331,6 +331,23 @@ function Git:get_status(directory, callback)
 end
 
 ---@param directory string Project directory
+---@param message string Commit message
+---@param callback plugins.scm.backend.onnewcommit
+function Git:new_commit(directory, message, callback)
+  self:execute(function(proc)
+    local status = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if stderr ~= "" then
+      status = stderr
+    elseif stdout ~= "" then
+      status = stdout
+    end
+    callback(status)
+  end, directory, "commit", "-m", message)
+end
+
+---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:pull(directory, callback)
   self:execute(function(proc)
