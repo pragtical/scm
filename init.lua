@@ -542,6 +542,29 @@ function scm.open_project_status(project_dir)
   end
 end
 
+---@param project_dir? string
+---@param message string
+function scm.new_commit(project_dir, message)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:new_commit(project_dir, message, function(status)
+      if status and status ~= "" then
+        local title = "New commit"
+          ---@type plugins.scm.readdoc
+          local doc = ReadDoc(title, title)
+          doc:set_text(status)
+          core.root_view:open_doc(doc)
+      else
+        core.warn("SCM: no status to report.")
+      end
+    end)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+  end
+end
+
+
 ---@param project_dir string
 function scm.pull(project_dir)
   local backend = PROJECTS[project_dir]
@@ -1209,6 +1232,15 @@ command.add(
 
   ["scm:project-status"] = function(project_dir)
     scm.open_project_status(project_dir)
+  end,
+
+  ["scm:new-commit"] = function(project_dir)
+    core.command_view:enter("Commit message", {
+      submit = function(message)
+        scm.new_commit(project_dir, message)
+      end,
+      select_text = true
+    })
   end
 })
 

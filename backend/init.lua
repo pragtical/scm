@@ -52,6 +52,7 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetstaged fun(files?:table<string,boolean>, cached?:boolean)
 ---@alias plugins.scm.backend.ongetstats fun(stats?:plugins.scm.backend.stats, cached?:boolean)
 ---@alias plugins.scm.backend.ongetstatus fun(status?:string, cached?:boolean)
+---@alias plugins.scm.backend.onnewcommit fun(status?:string, cached?:boolean)
 ---@alias plugins.scm.backend.onexecstatus fun(success:boolean, errmsg?:string)
 
 ---Base functionality to implement a SCM backend with async support.
@@ -379,6 +380,13 @@ function Backend:get_stats(directory, callback) callback({0, 0}) end
 ---@param callback plugins.scm.backend.ongetstatus
 ---@diagnostic disable-next-line
 function Backend:get_status(directory, callback) callback(nil) end
+
+---Create a new commit.
+---@param directory string Project directory
+---@param message string Commit message
+---@param callback plugins.scm.backend.onnewcommit
+---@diagnostic disable-next-line
+function Backend:new_commit(directory, message, callback) callback(nil) end
 
 ---Pull latest changes.
 ---TODO: this is a WIP we should handle remote and branch
