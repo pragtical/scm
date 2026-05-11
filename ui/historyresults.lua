@@ -24,8 +24,9 @@ local scm
 ---@field private line widget.line
 ---@field private list_container widget
 ---@field private list widget.listbox
----@field private branch string?
----@overload fun(project_dir:string,path?:string,branch?:string):plugins.scm.ui.HistoryResults
+---@field private target string?
+---@field private target_type "branch"|"tag"?
+---@overload fun(project_dir:string,path?:string,target?:string,target_type?:"branch"|"tag"):plugins.scm.ui.HistoryResults
 local HistoryResults = Widget:extend()
 
 ---@type core.contextmenu
@@ -34,8 +35,9 @@ HistoryResults.menu = ContextMenu()
 ---Constructor
 ---@param project_dir string
 ---@param path? string
----@param branch? string
-function HistoryResults:new(project_dir, path, branch)
+---@param target? string
+---@param target_type? "branch"|"tag"
+function HistoryResults:new(project_dir, path, target, target_type)
   HistoryResults.super.new(self)
 
   -- close when automatically loaded from workspace plugin
@@ -58,7 +60,8 @@ function HistoryResults:new(project_dir, path, branch)
   self.defer_draw = false
   self.project_dir = project_dir
   self.is_file = false
-  self.branch = branch
+  self.target = target
+  self.target_type = target_type or (target and "branch" or nil)
 
   self.searching = true
   if path then
@@ -69,9 +72,9 @@ function HistoryResults:new(project_dir, path, branch)
     self.path = common.basename(project_dir)
   end
 
-  local title_path = branch and self.is_file
-    and (self.path .. " on " .. branch)
-    or (branch or self.path)
+  local title_path = target and self.is_file
+    and (self.path .. " on " .. target)
+    or (target or self.path)
   self.name = title_path .. " - Commits History"
   self.title = Label(self, "History for: " .. title_path)
   self.line = Line(self, 2, style.padding.x)
@@ -180,8 +183,9 @@ function HistoryResults:update()
       label = "Loading Commits: "
     end
     local target = "Path: \"" .. self.path .. "\""
-    if self.branch then
-      target = "Branch: \"" .. self.branch .. "\""
+    if self.target then
+      local name = self.target_type == "tag" and "Tag" or "Branch"
+      target = name .. ": \"" .. self.target .. "\""
       if self.is_file then
         target = target .. ", Path: \"" .. self.path .. "\""
       end

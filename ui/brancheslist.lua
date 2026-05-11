@@ -129,6 +129,9 @@ end
 ---@param branch plugins.scm.backend.branch
 function BranchesList:add_branch(branch)
   local remote = branch.remote or ""
+  if branch.remote_only then
+    remote = remote ~= "" and remote or branch.name
+  end
   local date = branch.date or ""
   local commit = branch.commit or ""
   local message = branch.message or ""
@@ -237,7 +240,7 @@ end
 ---@param force boolean
 local function confirm_delete_branch(bl, force)
   local data = bl:get_selected_data()
-  if not data then return end
+  if not data or data.remote_only then return end
   local action = force and "Force Delete Branch" or "Delete Branch"
   local details = force
     and "Git will force delete the local branch even if it is unmerged.\n"
@@ -263,6 +266,37 @@ local function confirm_delete_branch(bl, force)
     end,
     MessageBox.BUTTONS_YES_NO
   )
+end
+
+---@param bl plugins.scm.ui.BranchesList
+local function refresh_from_remote(bl)
+  local function fetch(prune)
+    scm.fetch(bl.project_dir, function(success)
+      if success then
+        bl:refresh()
+      end
+    end, prune)
+  end
+
+  if bl.backend:supports_fetch_prune() then
+    MessageBox.warning(
+      "SCM Refresh From Remote",
+      {
+        "Also delete locally cached remote branches and tags that were deleted upstream?",
+        Widget.NEWLINE,
+        "Git may also update changed local tags to match the remote.",
+        Widget.NEWLINE,
+        Widget.NEWLINE,
+        "Project: " .. bl.project_dir
+      },
+      function(_, button_id)
+        fetch(button_id == 1)
+      end,
+      MessageBox.BUTTONS_YES_NO
+    )
+  else
+    fetch(false)
+  end
 end
 
 
@@ -315,6 +349,11 @@ command.add(
     end)
   end,
 
+  ["scm-branches:refresh-from-remote"] = function(bl)
+    ---@cast bl plugins.scm.ui.BranchesList
+    refresh_from_remote(bl)
+  end,
+
   ["scm-branches:delete"] = function(bl)
     ---@cast bl plugins.scm.ui.BranchesList
     confirm_delete_branch(bl, false)
@@ -331,13 +370,32 @@ BranchesList.menu:register(
   function()
     return core.active_view:is(BranchesList)
       and not core.active_view.searching
+      and core.active_view:get_selected_data()
   end, {
     { text = "View Changes Diff", command = "scm-branches:view-diff" },
     { text = "View Branch History", command = "scm-branches:view-history" },
     { text = "Copy Commit Hash", command = "scm-branches:copy-commit-hash" },
     { text = "Checkout Branch", command = "scm-branches:checkout" },
+    ContextMenu.DIVIDER
+})
+
+BranchesList.menu:register(
+  function()
+    return core.active_view:is(BranchesList)
+      and not core.active_view.searching
+  end, {
+    { text = "Refresh From Remote", command = "scm-branches:refresh-from-remote" },
+    { text = "Create Branch", command = "scm-branches:create" }
+})
+
+BranchesList.menu:register(
+  function()
+    return core.active_view:is(BranchesList)
+      and not core.active_view.searching
+      and core.active_view:get_selected_data()
+      and not core.active_view:get_selected_data().remote_only
+  end, {
     ContextMenu.DIVIDER,
-    { text = "Create Branch", command = "scm-branches:create" },
     { text = "Delete Branch", command = "scm-branches:delete" },
     { text = "Force Delete Branch", command = "scm-branches:force-delete" }
 })

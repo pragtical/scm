@@ -51,6 +51,7 @@ TreeViewMenu:register(
     { text = "View Changes Diff", command = "treeview:scm-global-diff" },
     { text = "View Project Status", command = "treeview:scm-project-status" },
     { text = "View Branches", command = "treeview:scm-view-branches" },
+    { text = "View Tags", command = "treeview:scm-view-tags" },
     { text = "View Commits History", command = "treeview:scm-commits-history" }
   }
 )
@@ -93,6 +94,10 @@ command.add(
 
   ["treeview:scm-view-branches"] = function()
     scm.open_branches_list(TreeView.hovered_item.abs_filename)
+  end,
+
+  ["treeview:scm-view-tags"] = function()
+    scm.open_tags_list(TreeView.hovered_item.abs_filename)
   end,
 
   ["treeview:scm-commits-history"] = function()

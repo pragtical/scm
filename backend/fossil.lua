@@ -12,6 +12,137 @@ function Fossil:new()
   self.super.new(self, "Fossil", "fossil")
 end
 
+---@param errmsg? string
+---@return boolean
+function Fossil:requires_credentials(errmsg)
+  errmsg = (errmsg or ""):lower()
+  return errmsg:find("password", 1, true) ~= nil
+    or errmsg:find("not authorized", 1, true) ~= nil
+    or errmsg:find("unauthorized", 1, true) ~= nil
+    or errmsg:find("authorization", 1, true) ~= nil
+    or errmsg:find("authentication", 1, true) ~= nil
+    or errmsg:find("login failed", 1, true) ~= nil
+    or errmsg:find("401", 1, true) ~= nil
+end
+
+---@param proc process
+---@param callback plugins.scm.backend.onexecstatus
+function Fossil:handle_exec_status(proc, callback)
+  local success = false
+  local errmsg = ""
+  local stdout = self:get_process_output(proc, "stdout")
+  local stderr = self:get_process_output(proc, "stderr")
+  if proc:returncode() == 0 then
+    success = true
+  else
+    if stderr ~= "" then
+      errmsg = stderr
+    elseif stdout ~= "" then
+      errmsg = stdout
+    end
+  end
+  callback(success, errmsg, self:requires_credentials(errmsg))
+end
+
+---@param username? string
+---@param password? string
+---@return boolean
+function Fossil:has_credentials(username, password)
+  return username ~= nil and username ~= ""
+    and password ~= nil and password ~= ""
+end
+
+---@param value string
+---@return string
+function Fossil:url_escape(value)
+  return (value:gsub("([^%w%-%._~])", function(char)
+    return string.format("%%%02X", char:byte())
+  end))
+end
+
+---@param url string
+---@param username string
+---@param password string
+---@return string?
+function Fossil:add_url_credentials(url, username, password)
+  url = url:match("^%s*(.-)%s*$")
+  if url == "" or url == "off" then
+    return nil
+  end
+  local scheme, rest = url:match("^([%w][%w%+%-%.]*://)(.+)$")
+  if not scheme then
+    return nil
+  end
+
+  local authority, path = rest:match("^([^/]*)(.*)$")
+  if not authority or authority == "" then
+    return nil
+  end
+  local host = authority:match("@(.+)$") or authority
+  return scheme
+    .. self:url_escape(username)
+    .. ":"
+    .. self:url_escape(password)
+    .. "@"
+    .. host
+    .. (path or "")
+end
+
+---@param url string
+---@return string?
+function Fossil:get_url_username(url)
+  url = url:match("^%s*(.-)%s*$")
+  local rest = url:match("^[%w][%w%+%-%.]*://(.+)$")
+  if not rest then
+    return nil
+  end
+
+  local authority = rest:match("^([^/]*)")
+  if not authority then
+    return nil
+  end
+  local userinfo = authority:match("^(.-)@")
+  if not userinfo or userinfo == "" then
+    return nil
+  end
+  local username = userinfo:match("^([^:]+)")
+  return username ~= "" and username or nil
+end
+
+---@param directory string Project directory
+---@param callback fun(url?:string, errmsg?:string)
+function Fossil:get_authenticated_remote_url(directory, username, password, callback)
+  self:execute(function(proc)
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() ~= 0 then
+      callback(nil, stderr ~= "" and stderr or stdout)
+      return
+    end
+
+    local remote_url = stdout:match("^%s*(.-)%s*$")
+    local authenticated_url = self:add_url_credentials(remote_url, username, password)
+    if authenticated_url then
+      callback(authenticated_url)
+    else
+      callback(nil, "Could not determine a HTTP remote URL for Fossil credentials.")
+    end
+  end, directory, "remote")
+end
+
+---@param directory string Project directory
+---@param callback fun(username?:string)
+function Fossil:get_username(directory, callback)
+  self:execute(function(proc)
+    if proc:returncode() ~= 0 then
+      callback(nil)
+      return
+    end
+    local stdout = self:get_process_output(proc, "stdout")
+    callback(self:get_url_username(stdout))
+  end, directory, "remote")
+end
+
 function Fossil:detect(directory)
   if not self.command then return false end
   local list = system.list_dir(directory)
@@ -106,6 +237,78 @@ function Fossil:get_branches(directory, callback)
   end, directory, "branch", "list")
 end
 
+---@param directory string
+---@param callback plugins.scm.backend.ongettags
+function Fossil:get_tags(directory, callback)
+  self:execute(function(proc)
+    ---@type plugins.scm.backend.tag[]
+    local tags = {}
+    for idx, line in self:get_process_lines(proc, "stdout") do
+      local name = line:match("^%s*(.-)%s*$")
+      if name and name ~= "" then
+        table.insert(tags, {
+          name = name,
+          commit = ""
+        })
+      end
+      if idx % 50 == 0 then
+        self:yield()
+      end
+    end
+
+    if #tags == 0 then
+      callback(tags)
+      return
+    end
+
+    local done = 0
+    for _, tag in ipairs(tags) do
+      self:execute(function(find_proc)
+        local commit = nil
+        for idx, line in self:get_process_lines(find_proc, "stdout") do
+          commit = line:match("^%s*([A-Fa-f0-9]+)%s*$")
+          if commit then break end
+          if idx % 50 == 0 then
+            self:yield()
+          end
+        end
+
+        if commit then
+          tag.commit = commit
+          self:execute(function(timeline_proc)
+            for idx, line in self:get_process_lines(timeline_proc, "stdout") do
+              local hash, date, message = line:match("^([A-Fa-f0-9]+)\t(.-)\t(.*)$")
+              if hash then
+                tag.date = date
+                tag.message = message
+                break
+              end
+              if idx % 50 == 0 then
+                self:yield()
+              end
+            end
+            done = done + 1
+          end, directory, "timeline", "before", commit, "-n", "1", "-F", "%H\t%d\t%c")
+        else
+          done = done + 1
+        end
+      end, directory, "tag", "find", "-t", "ci", "--raw", tag.name)
+    end
+
+    while done < #tags do
+      self:yield()
+    end
+
+    local filtered = {}
+    for _, tag in ipairs(tags) do
+      if tag.commit ~= "" then
+        table.insert(filtered, tag)
+      end
+    end
+    callback(filtered)
+  end, directory, "tag", "list", "--tagtype", "singleton")
+end
+
 ---@param branch string Branch to create
 ---@param base_branch string Branch or revision to base the new branch from
 ---@param directory string Project directory
@@ -127,6 +330,76 @@ function Fossil:create_branch(branch, base_branch, directory, callback)
     end
     callback(success, errmsg)
   end, directory, "branch", "new", branch, base_branch)
+end
+
+---@param tag string Tag to create
+---@param target string Branch, tag, commit or revision to tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param annotated? boolean
+---@param message? string
+function Fossil:create_tag(tag, target, directory, callback, annotated, message)
+  local params = { "tag", "add", tag, target }
+  if annotated and message and message ~= "" then
+    table.insert(params, message)
+  end
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, table.unpack(params))
+end
+
+---@param tag string Tag to update
+---@param old_commit string Commit currently associated with the tag
+---@param target string Branch, tag, commit or revision to tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param annotated? boolean
+---@param message? string
+function Fossil:update_tag(tag, old_commit, target, directory, callback, annotated, message)
+  self:execute(function(cancel_proc)
+    local cancel_stdout = self:get_process_output(cancel_proc, "stdout")
+    local cancel_stderr = self:get_process_output(cancel_proc, "stderr")
+    if cancel_proc:returncode() ~= 0 then
+      local errmsg = cancel_stderr ~= "" and cancel_stderr or cancel_stdout
+      callback(false, errmsg)
+      return
+    end
+
+    local params = { "tag", "add", tag, target }
+    if annotated and message and message ~= "" then
+      table.insert(params, message)
+    end
+    self:execute(function(add_proc)
+      local success = false
+      local errmsg = ""
+      local stdout = self:get_process_output(add_proc, "stdout")
+      local stderr = self:get_process_output(add_proc, "stderr")
+      if add_proc:returncode() == 0 then
+        success = true
+      else
+        if stderr ~= "" then
+          errmsg = stderr
+        elseif stdout ~= "" then
+          errmsg = stdout
+        end
+        errmsg = "Tag was cancelled but could not be recreated: " .. errmsg
+      end
+      callback(success, errmsg)
+    end, directory, table.unpack(params))
+  end, directory, "tag", "cancel", tag, old_commit)
 end
 
 ---@param target string Branch, commit or revision to checkout
@@ -174,6 +447,29 @@ function Fossil:delete_branch(branch, directory, callback, force)
   end, directory, "branch", "close", branch)
 end
 
+---@param tag string Tag to delete
+---@param commit string Commit associated with the tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+function Fossil:delete_tag(tag, commit, directory, callback)
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, "tag", "cancel", tag, commit)
+end
+
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetchanges
 function Fossil:get_changes(directory, callback)
@@ -217,14 +513,18 @@ end
 ---@param path? string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommithistory
----@param branch? string
-function Fossil:get_commit_history(path, directory, callback, branch)
+---@param target? string
+---@param target_type? "branch"|"tag"
+function Fossil:get_commit_history(path, directory, callback, target, target_type)
   local params = {
     "timeline", "-n", "0", "-F", "\"'%a' %H '%d' %c\""
   }
-  if branch then
+  if target and target_type == "tag" then
+    table.insert(params, 2, "before")
+    table.insert(params, 3, target)
+  elseif target then
     table.insert(params, "-b")
-    table.insert(params, branch)
+    table.insert(params, target)
   end
   if path then
     table.insert(params, "-p")
@@ -297,6 +597,17 @@ function Fossil:get_branch_diff(branch, head_branch, directory, callback)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
   end, directory, "diff", "--branch", branch)
+end
+
+---@param tag string
+---@param head_branch string
+---@param directory string
+---@param callback plugins.scm.backend.ongetdiff
+function Fossil:get_tag_diff(tag, head_branch, directory, callback)
+  self:execute(function(proc)
+    local diff = self:get_process_output(proc, "stdout")
+    callback(diff)
+  end, directory, "diff", "--from", tag, "--to", head_branch)
 end
 
 ---@param id? string
@@ -434,22 +745,46 @@ end
 
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
-function Fossil:pull(directory, callback)
-  self:execute(function(proc)
-    local success = false
-    local errmsg = ""
-    local stdout = self:get_process_output(proc, "stdout")
-    local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
-      success = true
-    else
-      if stderr ~= "" then
-        errmsg = stderr
-      elseif stdout ~= "" then
-        errmsg = stdout
+---@param username? string
+---@param password? string
+function Fossil:pull(directory, callback, username, password)
+  if self:has_credentials(username, password) then
+    self:get_authenticated_remote_url(directory, username, password, function(url, errmsg)
+      if not url then
+        callback(false, errmsg or "Could not determine Fossil remote URL.")
+        return
       end
-    end
-    callback(success, errmsg)
+      self:execute(function(proc)
+        self:handle_exec_status(proc, callback)
+      end, directory, "pull", url, "--once")
+    end)
+    return
+  end
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, directory, "pull")
+end
+
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param prune? boolean Ignored by Fossil
+---@param username? string
+---@param password? string
+function Fossil:fetch(directory, callback, prune, username, password)
+  if self:has_credentials(username, password) then
+    self:get_authenticated_remote_url(directory, username, password, function(url, errmsg)
+      if not url then
+        callback(false, errmsg or "Could not determine Fossil remote URL.")
+        return
+      end
+      self:execute(function(proc)
+        self:handle_exec_status(proc, callback)
+      end, directory, "pull", url, "--once")
+    end)
+    return
+  end
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
   end, directory, "pull")
 end
 

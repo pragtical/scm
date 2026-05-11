@@ -482,6 +482,43 @@ function scm.open_branch_diff(branch, head_branch, project_dir)
   end
 end
 
+---@param tag string Tag to diff
+---@param head_branch? string Branch to diff from
+---@param project_dir? string Project directory
+function scm.open_tag_diff(tag, head_branch, project_dir)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    local function open_diff_from_head(current_branch)
+      if not current_branch then
+        core.warn("SCM: could not determine current branch.")
+        return
+      end
+      backend:get_tag_diff(tag, current_branch, project_dir, function(diff)
+        if diff and diff ~= "" then
+          local ReadDocView = require "plugins.scm.ui.readdocview"
+          local title = string.format("[%s...%s].diff", tag, current_branch)
+          core.root_view:get_active_node_default():add_view(ReadDocView(title, diff))
+        else
+          core.warn(
+            "SCM: no changes detected between '%s' and '%s'.",
+            current_branch, tag
+          )
+        end
+      end)
+    end
+    if head_branch or BRANCHES[project_dir] then
+      open_diff_from_head(head_branch or BRANCHES[project_dir])
+    else
+      backend:get_branch(project_dir, function(current_branch)
+        open_diff_from_head(current_branch)
+      end)
+    end
+  else
+    core.warn("SCM: current project directory is not versioned.")
+  end
+end
+
 function scm.open_commit_file(commit, file)
   if not diffview_loaded then
     core.warn("SCM: this functionality needs Pragtical with diff support.")
@@ -522,8 +559,9 @@ function scm.open_commit_diff(commit, project_dir)
 end
 
 ---@param path? string
----@param branch? string
-function scm.open_commit_history(path, branch)
+---@param target? string
+---@param target_type? "branch"|"tag"
+function scm.open_commit_history(path, target, target_type)
   local project_dir = util.get_project_dir(path)
   if not project_dir and PROJECTS[path] then
     project_dir = path
@@ -536,8 +574,8 @@ function scm.open_commit_history(path, branch)
     local path_rel = ""
     if path then
       path_rel = common.relative_path(project_dir, path)
-    elseif branch then
-      path_rel = branch
+    elseif target then
+      path_rel = target
     else
       path_rel = common.basename(project_dir)
     end
@@ -545,7 +583,7 @@ function scm.open_commit_history(path, branch)
       if history and type(history) == "table" and #history > 0 then
         -- local title = string.format("%s.diff", path_rel)
         local HistoryResults = require "plugins.scm.ui.historyresults"
-        local results = HistoryResults(project_dir, path, branch)
+        local results = HistoryResults(project_dir, path, target, target_type)
         core.root_view:get_active_node_default():add_view(results)
         backend:yield()
         for idx, commit in ipairs(history) do
@@ -562,7 +600,7 @@ function scm.open_commit_history(path, branch)
       else
         core.warn("SCM: no history for '%s'.", path_rel)
       end
-    end, branch)
+    end, target, target_type)
   end
 end
 
@@ -580,6 +618,27 @@ function scm.open_branches_list(project_dir)
         results:populate(branches, backend)
       else
         core.warn("SCM: no branches for '%s'.", common.basename(project_dir))
+      end
+    end)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+  end
+end
+
+---@param project_dir? string
+function scm.open_tags_list(project_dir)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:get_tags(project_dir, function(tags)
+      if tags and type(tags) == "table" and #tags > 0 then
+        local TagsList = require "plugins.scm.ui.tagslist"
+        local results = TagsList(project_dir, backend)
+        core.root_view:get_active_node_default():add_view(results)
+        backend:yield()
+        results:populate(tags, backend)
+      else
+        core.warn("SCM: no tags for '%s'.", common.basename(project_dir))
       end
     end)
   else
@@ -630,16 +689,87 @@ end
 
 
 ---@param project_dir string
+---@param backend plugins.scm.backend
+---@param on_submit fun(username:string,password:string)
+---@param on_cancel? fun()
+local function request_credentials(project_dir, backend, on_submit, on_cancel)
+  local function show_dialog(username)
+    local CredentialsDialog = require "plugins.scm.ui.credentialsdialog"
+    local dialog = CredentialsDialog(project_dir, username)
+    function dialog:on_submit(user, password)
+      on_submit(user, password)
+    end
+    function dialog:on_cancel()
+      if on_cancel then on_cancel() end
+    end
+    dialog:show()
+  end
+
+  backend:get_username(project_dir, show_dialog)
+end
+
+---@param project_dir string
 function scm.pull(project_dir)
   local backend = PROJECTS[project_dir]
   if backend then
-    backend:pull(project_dir, function(success, errmsg)
-      if success then
-        core.log("SCM: pulled latest changes for '%s'", project_dir)
-      else
-        core.error("SCM: failed to pull '%s', %s", project_dir, errmsg)
-      end
-    end)
+    local function pull(username, password, retried_with_credentials)
+      backend:pull(project_dir, function(success, errmsg, requires_credentials)
+        if success then
+          core.log("SCM: pulled latest changes for '%s'", project_dir)
+        elseif not retried_with_credentials and (
+          requires_credentials or backend:requires_credentials(errmsg)
+        ) then
+          request_credentials(project_dir, backend, function(user, pass)
+            pull(user, pass, true)
+          end, function()
+            core.warn("SCM: pull cancelled, credentials not provided.")
+          end)
+        else
+          core.error("SCM: failed to pull '%s', %s", project_dir, errmsg)
+        end
+      end, username, password)
+    end
+    pull()
+  end
+end
+
+---@param project_dir? string
+---@param callback? fun(success:boolean, errmsg:string?)
+---@param prune? boolean
+function scm.fetch(project_dir, callback, prune)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    local function fetch(username, password, retried_with_credentials)
+      backend:fetch(project_dir, function(success, errmsg, requires_credentials)
+        if success then
+          core.log("SCM: refreshed remote refs for '%s'", project_dir)
+        elseif not retried_with_credentials and (
+          requires_credentials or backend:requires_credentials(errmsg)
+        ) then
+          request_credentials(project_dir, backend, function(user, pass)
+            fetch(user, pass, true)
+          end, function()
+            if callback then callback(false, "credentials not provided") end
+          end)
+          return
+        else
+          MessageBox.error(
+            "SCM Refresh From Remote Failed",
+            {
+              "Project: " .. project_dir .. "\n",
+              "",
+              errmsg or "Unknown error"
+            }
+          )
+        end
+        if callback then callback(success, errmsg) end
+      end, prune, username, password)
+    end
+    fetch()
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
   end
 end
 
@@ -686,6 +816,100 @@ function scm.create_branch(project_dir, callback)
         dialog:show()
       else
         core.warn("SCM: no branches found for '%s'.", project_dir)
+        if callback then callback(false) end
+      end
+    end)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
+  end
+end
+
+---@param project_dir? string
+---@param callback? fun(created:boolean, errmsg:string?)
+function scm.create_tag(project_dir, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:get_commit_history(nil, project_dir, function(commits)
+      if commits and type(commits) == "table" and #commits > 0 then
+        local CreateTagDialog = require "plugins.scm.ui.createtagdialog"
+        local dialog = CreateTagDialog(project_dir, commits)
+        function dialog:on_create(tag, target, annotated, message)
+          backend:create_tag(tag, target, project_dir, function(success, errmsg)
+            if success then
+              core.log(
+                "SCM: created tag '%s' from '%s' for '%s'",
+                tag,
+                target,
+                project_dir
+              )
+            else
+              MessageBox.error(
+                "SCM Create Tag Failed",
+                {
+                  "Tag: " .. tag .. "\n",
+                  "Target: " .. target .. "\n",
+                  "Project: " .. project_dir .. "\n",
+                  "",
+                  errmsg or "Unknown error"
+                }
+              )
+            end
+            if callback then callback(success, errmsg) end
+          end, annotated, message)
+        end
+        dialog:show()
+      else
+        core.warn("SCM: no commit targets found for '%s'.", project_dir)
+        if callback then callback(false) end
+      end
+    end)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
+  end
+end
+
+---@param tag_data plugins.scm.backend.tag
+---@param project_dir? string
+---@param callback? fun(updated:boolean, errmsg:string?)
+function scm.update_tag(tag_data, project_dir, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:get_commit_history(nil, project_dir, function(commits)
+      if commits and type(commits) == "table" and #commits > 0 then
+        local CreateTagDialog = require "plugins.scm.ui.createtagdialog"
+        local dialog = CreateTagDialog(project_dir, commits, tag_data)
+        function dialog:on_create(tag, target, annotated, message)
+          backend:update_tag(tag, tag_data.commit, target, project_dir, function(success, errmsg)
+            if success then
+              core.log(
+                "SCM: updated tag '%s' from '%s' to '%s' for '%s'",
+                tag,
+                tag_data.commit,
+                target,
+                project_dir
+              )
+            else
+              MessageBox.error(
+                "SCM Edit Tag Failed",
+                {
+                  "Tag: " .. tag .. "\n",
+                  "Target: " .. target .. "\n",
+                  "Project: " .. project_dir .. "\n",
+                  "",
+                  errmsg or "Unknown error"
+                }
+              )
+            end
+            if callback then callback(success, errmsg) end
+          end, annotated, message)
+        end
+        dialog:show()
+      else
+        core.warn("SCM: no commit targets found for '%s'.", project_dir)
         if callback then callback(false) end
       end
     end)
@@ -752,6 +976,36 @@ function scm.delete_branch(branch, project_dir, force, callback)
       end
       if callback then callback(success, errmsg) end
     end, force)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
+  end
+end
+
+---@param tag string Tag to delete
+---@param commit string Commit associated with the tag
+---@param project_dir? string
+---@param callback? fun(deleted:boolean, errmsg:string?)
+function scm.delete_tag(tag, commit, project_dir, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:delete_tag(tag, commit, project_dir, function(success, errmsg)
+      if success then
+        core.log("SCM: deleted tag '%s' for '%s'", tag, project_dir)
+      else
+        MessageBox.error(
+          "SCM Delete Tag Failed",
+          {
+            "Tag: " .. tag .. "\n",
+            "Project: " .. project_dir .. "\n",
+            "",
+            errmsg or "Unknown error"
+          }
+        )
+      end
+      if callback then callback(success, errmsg) end
+    end)
   else
     core.warn("SCM: current project directory is not versioned.")
     if callback then callback(false) end
@@ -1427,6 +1681,14 @@ command.add(
 
   ["scm:create-branch"] = function(project_dir)
     scm.create_branch(project_dir)
+  end,
+
+  ["scm:view-tags"] = function(project_dir)
+    scm.open_tags_list(project_dir)
+  end,
+
+  ["scm:create-tag"] = function(project_dir)
+    scm.create_tag(project_dir)
   end
 })
 

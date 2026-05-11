@@ -55,7 +55,8 @@ function Git:new()
     ".git" .. PATHSEP .. "objects",
     ".git" .. PATHSEP .. "COMMIT_EDITMSG",
     -- pushes
-    ".git" .. PATHSEP .. "refs" .. PATHSEP .. "remotes"
+    ".git" .. PATHSEP .. "refs" .. PATHSEP .. "remotes",
+    ".git" .. PATHSEP .. "refs" .. PATHSEP .. "tags"
   }
 end
 
@@ -89,6 +90,21 @@ end
 ---@return boolean
 function Git:has_staging()
   return true
+end
+
+---@param directory string Path of project directory
+---@return process.options
+function Git:get_process_options(directory)
+  return {
+    cwd = directory,
+    env = {
+      -- Let Git Credential Manager and platform askpass helpers decide how to
+      -- prompt from the editor instead of forcing terminal-only prompting.
+      GCM_INTERACTIVE = "auto",
+      GIT_TERMINAL_PROMPT = "0",
+      SSH_ASKPASS_REQUIRE = "prefer"
+    }
+  }
 end
 
 ---@param file string Absolute path to file
@@ -186,13 +202,15 @@ function Git:get_branches(directory, callback)
     local branches = {}
     for idx, line in self:get_process_lines(proc, "stdout") do
       if line ~= "" then
-        local name, remote, date, commit, message = line:match(
-          "^(.-)\t(.-)\t(.-)\t(%S+)\t(.*)$"
+        local ref, name, remote, date, commit, message = line:match(
+          "^(.-)\t(.-)\t(.-)\t(.-)\t(%S+)\t(.*)$"
         )
-        if name and commit then
+        if name and commit and not ref:match("/HEAD$") then
+          local remote_only = ref:match("^refs/remotes/") ~= nil
           table.insert(branches, {
             name = name,
             remote = remote,
+            remote_only = remote_only,
             date = date,
             commit = commit,
             message = message
@@ -205,8 +223,44 @@ function Git:get_branches(directory, callback)
     end
     callback(branches)
   end, directory,
-    "--no-optional-locks", "branch",
-    "--format=%(refname:short)%09%(upstream:short)%09%(committerdate:short)%09%(objectname)%09%(contents:subject)"
+    "--no-optional-locks", "for-each-ref", "refs/heads", "refs/remotes",
+    "--sort=-committerdate",
+    "--format=%(refname)%09%(refname:short)%09%(upstream:short)%09%(committerdate:short)%09%(objectname)%09%(contents:subject)"
+  )
+end
+
+---@param directory string
+---@param callback plugins.scm.backend.ongettags
+function Git:get_tags(directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    ---@type plugins.scm.backend.tag[]
+    local tags = {}
+    for idx, line in self:get_process_lines(proc, "stdout") do
+      if line ~= "" then
+        local name, date, peeled_commit, commit, message = line:match(
+          "^(.-)\t(.-)\t(.-)\t(%S+)\t(.*)$"
+        )
+        if name and commit then
+          local annotated = peeled_commit ~= ""
+          table.insert(tags, {
+            name = name,
+            date = date,
+            commit = annotated and peeled_commit or commit,
+            message = message,
+            annotated = annotated
+          })
+        end
+      end
+      if idx % 50 == 0 then
+        self:yield()
+      end
+    end
+    callback(tags)
+  end, directory,
+    "--no-optional-locks", "for-each-ref", "refs/tags",
+    "--sort=-creatordate",
+    "--format=%(refname:short)%09%(creatordate:short)%09%(*objectname)%09%(objectname)%09%(subject)"
   )
 end
 
@@ -232,6 +286,79 @@ function Git:create_branch(branch, base_branch, directory, callback)
     end
     callback(success, errmsg)
   end, directory, "branch", branch, base_branch)
+end
+
+---@param tag string Tag to create
+---@param target string Branch, tag, commit or revision to tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param annotated? boolean
+---@param message? string
+function Git:create_tag(tag, target, directory, callback, annotated, message)
+  directory = git_repo_dir(directory)
+  local params = { "tag" }
+  if annotated then
+    table.insert(params, "-a")
+  end
+  table.insert(params, tag)
+  table.insert(params, target)
+  if annotated then
+    table.insert(params, "-m")
+    table.insert(params, message or "")
+  end
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, table.unpack(params))
+end
+
+---@param tag string Tag to update
+---@param old_commit string Commit currently associated with the tag
+---@param target string Branch, tag, commit or revision to tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param annotated? boolean
+---@param message? string
+function Git:update_tag(tag, old_commit, target, directory, callback, annotated, message)
+  directory = git_repo_dir(directory)
+  local params = { "tag", "-f" }
+  if annotated then
+    table.insert(params, "-a")
+  end
+  table.insert(params, tag)
+  table.insert(params, target)
+  if annotated then
+    table.insert(params, "-m")
+    table.insert(params, message or "")
+  end
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, table.unpack(params))
 end
 
 ---@param target string Branch, commit or revision to checkout
@@ -279,6 +406,30 @@ function Git:delete_branch(branch, directory, callback, force)
     end
     callback(success, errmsg)
   end, directory, "--no-optional-locks", "branch", force and "-D" or "-d", "--", branch)
+end
+
+---@param tag string Tag to delete
+---@param commit string Commit associated with the tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+function Git:delete_tag(tag, commit, directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, "--no-optional-locks", "tag", "-d", "--", tag)
 end
 
 ---Get list of changes for a git directory or submodule.
@@ -379,17 +530,20 @@ end
 ---@param path? string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommithistory
----@param branch? string
-function Git:get_commit_history(path, directory, callback, branch)
+---@param target? string
+---@param target_type? "branch"|"tag"
+function Git:get_commit_history(path, directory, callback, target, target_type)
   directory = git_repo_dir(directory, path)
   local params = {
     "log", "--oneline", "--no-decorate",
     "--pretty=format:'%an' %H %ct %s"
   }
-  if branch then
-    table.insert(params, branch)
-    table.insert(params, "--not")
-    table.insert(params, "HEAD")
+  if target then
+    table.insert(params, target)
+    if target_type ~= "tag" then
+      table.insert(params, "--not")
+      table.insert(params, "HEAD")
+    end
   end
   if path then
     table.insert(params, "--")
@@ -475,6 +629,18 @@ function Git:get_branch_diff(branch, head_branch, directory, callback)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
   end, directory, "--no-optional-locks", "diff", head_branch .. "..." .. branch)
+end
+
+---@param tag string
+---@param head_branch string
+---@param directory string
+---@param callback plugins.scm.backend.ongetdiff
+function Git:get_tag_diff(tag, head_branch, directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    local diff = self:get_process_output(proc, "stdout")
+    callback(diff)
+  end, directory, "--no-optional-locks", "diff", tag .. "..." .. head_branch)
 end
 
 ---@param id? string
@@ -651,6 +817,90 @@ function Git:pull(directory, callback)
     end
     callback(success, errmsg)
   end, directory, "pull")
+end
+
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param prune? boolean
+function Git:fetch(directory, callback, prune)
+  directory = git_repo_dir(directory)
+
+  local function fetch_remote(remote)
+    local params = { "--no-optional-locks", "fetch", "--quiet", "--tags", "--force" }
+    if prune then
+      table.insert(params, "--prune")
+      table.insert(params, "--prune-tags")
+    end
+    table.insert(params, remote)
+    self:execute(function(proc)
+      local success = false
+      local errmsg = ""
+      local stdout = self:get_process_output(proc, "stdout")
+      local stderr = self:get_process_output(proc, "stderr")
+      if proc:returncode() == 0 then
+        success = true
+      else
+        if stderr ~= "" then
+          errmsg = stderr
+        elseif stdout ~= "" then
+          errmsg = stdout
+        end
+      end
+      callback(success, errmsg)
+    end, directory, table.unpack(params))
+  end
+
+  local function fetch_first_remote()
+    self:execute(function(proc)
+      local remote = nil
+      local first_remote = nil
+      for idx, line in self:get_process_lines(proc, "stdout") do
+        if line ~= "" then
+          first_remote = first_remote or line
+          if line == "origin" then
+            remote = line
+            break
+          end
+        end
+        if idx % 50 == 0 then
+          self:yield()
+        end
+      end
+      remote = remote or first_remote
+      if remote then
+        fetch_remote(remote)
+      else
+        callback(false, "no remote configured")
+      end
+    end, directory, "remote")
+  end
+
+  self:execute(function(branch_proc)
+    local branch = nil
+    for _, line in self:get_process_lines(branch_proc, "stdout") do
+      branch = line:match("^%s*(.-)%s*$")
+      break
+    end
+    if not branch or branch == "" or branch == "HEAD" then
+      fetch_first_remote()
+      return
+    end
+    self:execute(function(remote_proc)
+      local remote = nil
+      local stdout = self:get_process_output(remote_proc, "stdout")
+      remote = stdout:match("^%s*(.-)%s*$")
+      if remote and remote ~= "" then
+        fetch_remote(remote)
+      else
+        fetch_first_remote()
+      end
+    end, directory, "config", "branch." .. branch .. ".remote")
+  end, directory, "rev-parse", "--abbrev-ref", "HEAD")
+end
+
+---@return boolean
+function Git:supports_fetch_prune()
+  return true
 end
 
 ---@param file string Absolute path to file

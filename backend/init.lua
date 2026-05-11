@@ -24,9 +24,17 @@ local Object = require "core.object"
 ---@class plugins.scm.backend.branch
 ---@field name string
 ---@field remote? string
+---@field remote_only? boolean
 ---@field date? string
 ---@field commit string
 ---@field message? string
+
+---@class plugins.scm.backend.tag
+---@field name string
+---@field date? string
+---@field commit string
+---@field message? string
+---@field annotated? boolean
 
 ---@class plugins.scm.backend.cache
 ---@field name string
@@ -52,6 +60,7 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetfile fun(content?:string)
 ---@alias plugins.scm.backend.ongetbranch fun(branch?:string, cached?:boolean)
 ---@alias plugins.scm.backend.ongetbranches fun(branches?:plugins.scm.backend.branch[], cached?:boolean)
+---@alias plugins.scm.backend.ongettags fun(tags?:plugins.scm.backend.tag[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetchanges fun(changes:plugins.scm.backend.filechange[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommithistory fun(changes?:plugins.scm.backend.commit[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommit fun(changes:plugins.scm.backend.commit, cached?:boolean)
@@ -61,7 +70,7 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetstats fun(stats?:plugins.scm.backend.stats, cached?:boolean)
 ---@alias plugins.scm.backend.ongetstatus fun(status?:string, cached?:boolean)
 ---@alias plugins.scm.backend.onnewcommit fun(status?:string, cached?:boolean)
----@alias plugins.scm.backend.onexecstatus fun(success:boolean, errmsg?:string)
+---@alias plugins.scm.backend.onexecstatus fun(success:boolean, errmsg?:string, requires_credentials?:boolean)
 
 ---Base functionality to implement a SCM backend with async support.
 ---@class plugins.scm.backend : core.object
@@ -246,9 +255,10 @@ end
 function Backend:execute(callback, directory, ...)
   if not self.command then return end
   local command = table.pack(self.command, ...)
+  local options = self:get_process_options(directory)
   local proc, errmsg, errcode
   local ran, ranerr = core.try(function()
-    proc, errmsg, errcode = process.start(command, {cwd = directory})
+    proc, errmsg, errcode = process.start(command, options)
     if not self.blocking then
       core.add_thread(function()
         callback(proc, errmsg, errcode)
@@ -267,6 +277,13 @@ function Backend:execute(callback, directory, ...)
       table.unpack(msg_code)
     )
   end
+end
+
+---Build process options for SCM command execution.
+---@param directory string Path of project directory
+---@return process.options
+function Backend:get_process_options(directory)
+  return {cwd = directory}
 end
 
 ---Check if given directory is source controlled by current backend.
@@ -321,6 +338,12 @@ function Backend:get_branch(directory, callback) callback(nil) end
 ---@diagnostic disable-next-line
 function Backend:get_branches(directory, callback) callback(nil) end
 
+---Retrieve all tags with the commit each tag points to.
+---@param directory string Project directory
+---@param callback plugins.scm.backend.ongettags
+---@diagnostic disable-next-line
+function Backend:get_tags(directory, callback) callback(nil) end
+
 ---Create a new branch from the given base branch.
 ---@param branch string Branch to create
 ---@param base_branch string Branch or revision to base the new branch from
@@ -328,6 +351,27 @@ function Backend:get_branches(directory, callback) callback(nil) end
 ---@param callback plugins.scm.backend.onexecstatus
 ---@diagnostic disable-next-line
 function Backend:create_branch(branch, base_branch, directory, callback) callback(false, "not implemented") end
+
+---Create a new tag from the given target revision.
+---@param tag string Tag to create
+---@param target string Branch, tag, commit or revision to tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param annotated? boolean Create an annotated tag when supported
+---@param message? string Message for annotated tags when supported
+---@diagnostic disable-next-line
+function Backend:create_tag(tag, target, directory, callback, annotated, message) callback(false, "not implemented") end
+
+---Update an existing tag by replacing the target and supported metadata.
+---@param tag string Tag to update
+---@param old_commit string Commit currently associated with the tag
+---@param target string Branch, tag, commit or revision to tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param annotated? boolean Create an annotated tag when supported
+---@param message? string Message for annotated tags when supported
+---@diagnostic disable-next-line
+function Backend:update_tag(tag, old_commit, target, directory, callback, annotated, message) callback(false, "not implemented") end
 
 ---Checkout the given branch, commit, tag or other backend-supported revision.
 ---@param target string Branch, commit or revision to checkout
@@ -344,6 +388,14 @@ function Backend:checkout(target, directory, callback) callback(false, "not impl
 ---@diagnostic disable-next-line
 function Backend:delete_branch(branch, directory, callback, force) callback(false, "not implemented") end
 
+---Delete the given tag.
+---@param tag string Tag to delete
+---@param commit string Commit associated with the tag
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@diagnostic disable-next-line
+function Backend:delete_tag(tag, commit, directory, callback) callback(false, "not implemented") end
+
 ---Retrieve a list of file changes.
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.ongetchanges
@@ -354,9 +406,10 @@ function Backend:get_changes(directory, callback) callback({}, false) end
 ---@param path? string If not nil get commit history of specific file or directory.
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.ongetcommithistory
----@param branch? string If not nil get commit history for a specific branch.
+---@param target? string If not nil get commit history for a specific branch or tag.
+---@param target_type? "branch"|"tag"
 ---@diagnostic disable-next-line
-function Backend:get_commit_history(path, directory, callback, branch) callback(nil) end
+function Backend:get_commit_history(path, directory, callback, target, target_type) callback(nil) end
 
 ---Retrieve the entire project unified diff.
 ---@param id string Hash of the commit
@@ -379,6 +432,14 @@ function Backend:get_commit_diff(id, directory, callback) callback(nil) end
 ---@param callback plugins.scm.backend.ongetdiff
 ---@diagnostic disable-next-line
 function Backend:get_branch_diff(branch, head_branch, directory, callback) callback(nil) end
+
+---Retrieve the diff between head_branch and tag.
+---@param tag string Tag to diff
+---@param head_branch string Branch to diff from
+---@param directory string Project directory
+---@param callback plugins.scm.backend.ongetdiff
+---@diagnostic disable-next-line
+function Backend:get_tag_diff(tag, head_branch, directory, callback) callback(nil) end
 
 ---Retrieve the contents of a file for a given commit.
 ---@param id? string Hash of the commit
@@ -438,8 +499,34 @@ function Backend:new_commit(directory, message, callback) callback(nil) end
 ---TODO: this is a WIP we should handle remote and branch
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
+---@param username? string
+---@param password? string
 ---@diagnostic disable-next-line
-function Backend:pull(directory, callback) callback(false, "not implemented") end
+function Backend:pull(directory, callback, username, password) callback(false, "not implemented") end
+
+---Fetch remote references without updating the current checkout.
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param prune? boolean Remove locally cached remote refs deleted upstream when supported
+---@param username? string
+---@param password? string
+---@diagnostic disable-next-line
+function Backend:fetch(directory, callback, prune, username, password) callback(false, "not implemented") end
+
+---Report if fetch supports pruning refs deleted upstream.
+---@return boolean
+function Backend:supports_fetch_prune() return false end
+
+---Report if a backend error can be retried after asking the user for credentials.
+---@param errmsg? string
+---@return boolean
+function Backend:requires_credentials(errmsg) return false end
+
+---Retrieve the username currently remembered by the backend, when available.
+---@param directory string Project directory
+---@param callback fun(username?:string)
+---@diagnostic disable-next-line
+function Backend:get_username(directory, callback) callback(nil) end
 
 ---Restore a file to its previous HEAD state before any changes.
 ---@param file string Absolute path to file
