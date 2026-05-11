@@ -177,6 +177,110 @@ function Git:get_branch(directory, callback)
   end, directory, "--no-optional-locks", "rev-parse", "--abbrev-ref", "HEAD")
 end
 
+---@param directory string
+---@param callback plugins.scm.backend.ongetbranches
+function Git:get_branches(directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    ---@type plugins.scm.backend.branch[]
+    local branches = {}
+    for idx, line in self:get_process_lines(proc, "stdout") do
+      if line ~= "" then
+        local name, remote, date, commit, message = line:match(
+          "^(.-)\t(.-)\t(.-)\t(%S+)\t(.*)$"
+        )
+        if name and commit then
+          table.insert(branches, {
+            name = name,
+            remote = remote,
+            date = date,
+            commit = commit,
+            message = message
+          })
+        end
+      end
+      if idx % 50 == 0 then
+        self:yield()
+      end
+    end
+    callback(branches)
+  end, directory,
+    "--no-optional-locks", "branch",
+    "--format=%(refname:short)%09%(upstream:short)%09%(committerdate:short)%09%(objectname)%09%(contents:subject)"
+  )
+end
+
+---@param branch string Branch to create
+---@param base_branch string Branch or revision to base the new branch from
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+function Git:create_branch(branch, base_branch, directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, "branch", branch, base_branch)
+end
+
+---@param target string Branch, commit or revision to checkout
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+function Git:checkout(target, directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, "checkout", target)
+end
+
+---@param branch string Branch to delete
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param force? boolean Force deletion
+function Git:delete_branch(branch, directory, callback, force)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, "--no-optional-locks", "branch", force and "-D" or "-d", "--", branch)
+end
+
 ---Get list of changes for a git directory or submodule.
 ---@param self plugins.scm.backend
 ---@param directory string
@@ -275,12 +379,18 @@ end
 ---@param path? string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommithistory
-function Git:get_commit_history(path, directory, callback)
+---@param branch? string
+function Git:get_commit_history(path, directory, callback, branch)
   directory = git_repo_dir(directory, path)
   local params = {
     "log", "--oneline", "--no-decorate",
     "--pretty=format:'%an' %H %ct %s"
   }
+  if branch then
+    table.insert(params, branch)
+    table.insert(params, "--not")
+    table.insert(params, "HEAD")
+  end
   if path then
     table.insert(params, "--")
     table.insert(params, common.relative_path(directory, path))
@@ -353,6 +463,18 @@ function Git:get_commit_diff(id, directory, callback)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
   end, directory, "--no-optional-locks", "show", "-U", id)
+end
+
+---@param branch string
+---@param head_branch string
+---@param directory string
+---@param callback plugins.scm.backend.ongetdiff
+function Git:get_branch_diff(branch, head_branch, directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    local diff = self:get_process_output(proc, "stdout")
+    callback(diff)
+  end, directory, "--no-optional-locks", "diff", head_branch .. "..." .. branch)
 end
 
 ---@param id? string

@@ -54,6 +54,127 @@ function Fossil:get_branch(directory, callback)
 end
 
 ---@param directory string
+---@param callback plugins.scm.backend.ongetbranches
+function Fossil:get_branches(directory, callback)
+  self:execute(function(proc)
+    ---@type plugins.scm.backend.branch[]
+    local branches = {}
+    for idx, line in self:get_process_lines(proc, "stdout") do
+      if line ~= "" then
+        local name = line:match("^%s*[%*#]?%s*(.-)%s*$")
+        if name and name ~= "" then
+          table.insert(branches, {
+            name = name,
+            commit = ""
+          })
+        end
+      end
+      if idx % 50 == 0 then
+        self:yield()
+      end
+    end
+
+    if #branches == 0 then
+      callback(branches)
+      return
+    end
+
+    local done = 0
+    for _, branch in ipairs(branches) do
+      self:execute(function(branch_proc)
+        for idx, line in self:get_process_lines(branch_proc, "stdout") do
+          local commit, date, message = line:match("^([A-Fa-f0-9]+)\t(.-)\t(.*)$")
+          if commit then
+            branch.commit = commit
+            branch.date = date
+            branch.message = message
+            break
+          end
+          if idx % 50 == 0 then
+            self:yield()
+          end
+        end
+        done = done + 1
+      end, directory, "timeline", "-n", "1", "-b", branch.name, "-F", "%H\t%d\t%c")
+    end
+
+    while done < #branches do
+      self:yield()
+    end
+
+    callback(branches)
+  end, directory, "branch", "list")
+end
+
+---@param branch string Branch to create
+---@param base_branch string Branch or revision to base the new branch from
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+function Fossil:create_branch(branch, base_branch, directory, callback)
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, "branch", "new", branch, base_branch)
+end
+
+---@param target string Branch, commit or revision to checkout
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+function Fossil:checkout(target, directory, callback)
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, "update", target)
+end
+
+---@param branch string Branch to close
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param force? boolean Ignored by Fossil
+function Fossil:delete_branch(branch, directory, callback, force)
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg)
+  end, directory, "branch", "close", branch)
+end
+
+---@param directory string
 ---@param callback plugins.scm.backend.ongetchanges
 function Fossil:get_changes(directory, callback)
   directory = directory:gsub("[/\\]$", "")
@@ -96,10 +217,15 @@ end
 ---@param path? string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommithistory
-function Fossil:get_commit_history(path, directory, callback)
+---@param branch? string
+function Fossil:get_commit_history(path, directory, callback, branch)
   local params = {
     "timeline", "-n", "0", "-F", "\"'%a' %H '%d' %c\""
   }
+  if branch then
+    table.insert(params, "-b")
+    table.insert(params, branch)
+  end
   if path then
     table.insert(params, "-p")
     table.insert(params, common.relative_path(directory, path))
@@ -160,6 +286,17 @@ function Fossil:get_commit_diff(id, directory, callback)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
   end, directory, "diff", "--unified", "-ci", id)
+end
+
+---@param branch string
+---@param head_branch string
+---@param directory string
+---@param callback plugins.scm.backend.ongetdiff
+function Fossil:get_branch_diff(branch, head_branch, directory, callback)
+  self:execute(function(proc)
+    local diff = self:get_process_output(proc, "stdout")
+    callback(diff)
+  end, directory, "diff", "--branch", branch)
 end
 
 ---@param id? string

@@ -17,14 +17,15 @@ local ContextMenu = require "core.contextmenu"
 ---@type plugins.scm
 local scm
 
----@class plugins.scm.HistoryResults : widget
+---@class plugins.scm.ui.HistoryResults : widget
 ---@field public searching boolean
 ---@field public symbol string
 ---@field private title widget.label
 ---@field private line widget.line
 ---@field private list_container widget
 ---@field private list widget.listbox
----@overload fun(project_dir:string,path?:string):plugins.scm.HistoryResults
+---@field private branch string?
+---@overload fun(project_dir:string,path?:string,branch?:string):plugins.scm.ui.HistoryResults
 local HistoryResults = Widget:extend()
 
 ---@type core.contextmenu
@@ -33,7 +34,8 @@ HistoryResults.menu = ContextMenu()
 ---Constructor
 ---@param project_dir string
 ---@param path? string
-function HistoryResults:new(project_dir, path)
+---@param branch? string
+function HistoryResults:new(project_dir, path, branch)
   HistoryResults.super.new(self)
 
   -- close when automatically loaded from workspace plugin
@@ -56,6 +58,7 @@ function HistoryResults:new(project_dir, path)
   self.defer_draw = false
   self.project_dir = project_dir
   self.is_file = false
+  self.branch = branch
 
   self.searching = true
   if path then
@@ -66,8 +69,11 @@ function HistoryResults:new(project_dir, path)
     self.path = common.basename(project_dir)
   end
 
-  self.name = self.path .. " - Commits History"
-  self.title = Label(self, "History for: " .. self.path)
+  local title_path = branch and self.is_file
+    and (self.path .. " on " .. branch)
+    or (branch or self.path)
+  self.name = title_path .. " - Commits History"
+  self.title = Label(self, "History for: " .. title_path)
   self.line = Line(self, 2, style.padding.x)
   self.textbox = TextBox(self, "", "filter commits...")
 
@@ -173,14 +179,18 @@ function HistoryResults:update()
     if self.searching then
       label = "Loading Commits: "
     end
+    local target = "Path: \"" .. self.path .. "\""
+    if self.branch then
+      target = "Branch: \"" .. self.branch .. "\""
+      if self.is_file then
+        target = target .. ", Path: \"" .. self.path .. "\""
+      end
+    end
     self.title:set_label(
       label
         .. #self.list.rows
         .. ", "
-        .. "Path: "
-        .. '"'
-        .. self.path
-        .. '"'
+        .. target
     )
   end
   self.line:set_position(0, self.title:get_bottom() + 10)
@@ -202,7 +212,7 @@ command.add(
       core.active_view
   end, {
   ["scm-history:copy-commit-hash"] = function(hr)
-    ---@cast hr plugins.scm.HistoryResults
+    ---@cast hr plugins.scm.ui.HistoryResults
     local data = hr:get_selected_data()
     if data then
       system.set_clipboard(data.hash)
@@ -211,7 +221,7 @@ command.add(
   end,
 
   ["scm-history:view-diff"] = function(hr)
-    ---@cast hr plugins.scm.HistoryResults
+    ---@cast hr plugins.scm.ui.HistoryResults
     local data = hr:get_selected_data()
     if data then
       scm.open_commit_diff(data.hash, hr.project_dir)
@@ -226,7 +236,7 @@ command.add(
       core.active_view
   end, {
   ["scm-history:compare-with-current"] = function(hr)
-    ---@cast hr plugins.scm.HistoryResults
+    ---@cast hr plugins.scm.ui.HistoryResults
     local data = hr:get_selected_data()
     if data then
       scm.open_commit_file(data.hash, hr.abs_path)

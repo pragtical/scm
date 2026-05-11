@@ -9,8 +9,8 @@ local DocView = require "core.docview"
 --------------------------------------------------------------------------------
 
 ---A readonly core.doc.
----@class plugins.scm.readdoc : core.doc
----@overload fun(title?:string, text?:string):plugins.scm.readdoc
+---@class plugins.scm.ui.readdoc : core.doc
+---@overload fun(title?:string, text?:string):plugins.scm.ui.readdoc
 local ReadDoc = Doc:extend()
 
 function ReadDoc:new(title, text)
@@ -23,12 +23,13 @@ end
 function ReadDoc:set_text(text)
   self.lines = {}
   local i = 1
-  for line in text:gmatch("([^\n]*)\n?") do
-    if line:byte(-1) == 13 then
-      line = line:sub(1, -2)
+  for text_line in text:gmatch("([^\n]*)\n?") do
+    local value = text_line
+    if value:byte(-1) == 13 then
+      value = value:sub(1, -2)
       self.crlf = true
     end
-    table.insert(self.lines, line .. "\n")
+    table.insert(self.lines, value .. "\n")
     self.highlighter.lines[i] = false
     i = i + 1
   end
@@ -46,8 +47,8 @@ function ReadDoc:save(...) end
 --------------------------------------------------------------------------------
 
 ---A readonly core.docview
----@class plugins.scm.readdocview : core.docview
----@overload fun(title?:string, text?:string):plugins.scm.readdocview
+---@class plugins.scm.ui.readdocview : core.docview
+---@overload fun(title?:string, text?:string):plugins.scm.ui.readdocview
 local ReadDocView = DocView:extend()
 
 ---Constructor

@@ -21,6 +21,13 @@ local Object = require "core.object"
 ---@field inserts integer
 ---@field deletes integer
 
+---@class plugins.scm.backend.branch
+---@field name string
+---@field remote? string
+---@field date? string
+---@field commit string
+---@field message? string
+
 ---@class plugins.scm.backend.cache
 ---@field name string
 ---@field path string
@@ -44,6 +51,7 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetdiff fun(diff?:string, cached?:boolean)
 ---@alias plugins.scm.backend.ongetfile fun(content?:string)
 ---@alias plugins.scm.backend.ongetbranch fun(branch?:string, cached?:boolean)
+---@alias plugins.scm.backend.ongetbranches fun(branches?:plugins.scm.backend.branch[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetchanges fun(changes:plugins.scm.backend.filechange[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommithistory fun(changes?:plugins.scm.backend.commit[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommit fun(changes:plugins.scm.backend.commit, cached?:boolean)
@@ -307,6 +315,35 @@ function Backend:get_staged(directory, callback) callback(nil) end
 ---@diagnostic disable-next-line
 function Backend:get_branch(directory, callback) callback(nil) end
 
+---Retrieve all branches with the latest commit of each branch.
+---@param directory string Project directory
+---@param callback plugins.scm.backend.ongetbranches
+---@diagnostic disable-next-line
+function Backend:get_branches(directory, callback) callback(nil) end
+
+---Create a new branch from the given base branch.
+---@param branch string Branch to create
+---@param base_branch string Branch or revision to base the new branch from
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@diagnostic disable-next-line
+function Backend:create_branch(branch, base_branch, directory, callback) callback(false, "not implemented") end
+
+---Checkout the given branch, commit, tag or other backend-supported revision.
+---@param target string Branch, commit or revision to checkout
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@diagnostic disable-next-line
+function Backend:checkout(target, directory, callback) callback(false, "not implemented") end
+
+---Delete the given branch.
+---@param branch string Branch to delete
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param force? boolean Force deletion when supported by the backend
+---@diagnostic disable-next-line
+function Backend:delete_branch(branch, directory, callback, force) callback(false, "not implemented") end
+
 ---Retrieve a list of file changes.
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.ongetchanges
@@ -317,8 +354,9 @@ function Backend:get_changes(directory, callback) callback({}, false) end
 ---@param path? string If not nil get commit history of specific file or directory.
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.ongetcommithistory
+---@param branch? string If not nil get commit history for a specific branch.
 ---@diagnostic disable-next-line
-function Backend:get_commit_history(path, directory, callback) callback(nil) end
+function Backend:get_commit_history(path, directory, callback, branch) callback(nil) end
 
 ---Retrieve the entire project unified diff.
 ---@param id string Hash of the commit
@@ -333,6 +371,14 @@ function Backend:get_commit_info(id, directory, callback) callback(nil) end
 ---@param callback plugins.scm.backend.ongetdiff
 ---@diagnostic disable-next-line
 function Backend:get_commit_diff(id, directory, callback) callback(nil) end
+
+---Retrieve the diff of changes introduced by branch compared to head_branch.
+---@param branch string Branch to diff
+---@param head_branch string Branch to diff from
+---@param directory string Project directory
+---@param callback plugins.scm.backend.ongetdiff
+---@diagnostic disable-next-line
+function Backend:get_branch_diff(branch, head_branch, directory, callback) callback(nil) end
 
 ---Retrieve the contents of a file for a given commit.
 ---@param id? string Hash of the commit

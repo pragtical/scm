@@ -50,6 +50,7 @@ TreeViewMenu:register(
     { text = "Pull From Remote", command = "treeview:scm-pull" },
     { text = "View Changes Diff", command = "treeview:scm-global-diff" },
     { text = "View Project Status", command = "treeview:scm-project-status" },
+    { text = "View Branches", command = "treeview:scm-view-branches" },
     { text = "View Commits History", command = "treeview:scm-commits-history" }
   }
 )
@@ -88,6 +89,10 @@ command.add(
 
   ["treeview:scm-project-status"] = function()
     scm.open_project_status(TreeView.hovered_item.abs_filename)
+  end,
+
+  ["treeview:scm-view-branches"] = function()
+    scm.open_branches_list(TreeView.hovered_item.abs_filename)
   end,
 
   ["treeview:scm-commits-history"] = function()

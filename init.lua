@@ -21,7 +21,6 @@ local Doc = require "core.doc"
 local DocView = require "core.docview"
 local DirWatch = require "core.dirwatch"
 local StatusView = require "core.statusview"
-local ReadDocView = require "plugins.scm.readdocview"
 local Git = require "plugins.scm.backend.git"
 local Fossil = require "plugins.scm.backend.fossil"
 local MessageBox = require "widget.messagebox"
@@ -412,6 +411,7 @@ function scm.open_diff(project_dir)
   if backend then
     backend:get_diff(project_dir, function(diff)
       if diff and diff ~= "" then
+        local ReadDocView = require "plugins.scm.ui.readdocview"
         local title = "[CHANGES].diff"
         core.root_view:get_active_node_default():add_view(ReadDocView(title, diff))
       else
@@ -430,6 +430,7 @@ function scm.open_path_diff(path)
     local path_rel = common.relative_path(project_dir, path)
     backend:get_file_diff(path, project_dir, function(diff)
       if diff and diff ~= "" then
+        local ReadDocView = require "plugins.scm.ui.readdocview"
         local title = string.format("%s.diff", path_rel)
         core.root_view:get_active_node_default():add_view(ReadDocView(title, diff))
       else
@@ -441,6 +442,43 @@ function scm.open_path_diff(path)
         end
       end
     end)
+  end
+end
+
+---@param branch string Branch to diff
+---@param head_branch? string Branch to diff from
+---@param project_dir? string Project directory
+function scm.open_branch_diff(branch, head_branch, project_dir)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    local function open_diff_from_head(current_branch)
+      if not current_branch then
+        core.warn("SCM: could not determine current branch.")
+        return
+      end
+      backend:get_branch_diff(branch, current_branch, project_dir, function(diff)
+        if diff and diff ~= "" then
+          local ReadDocView = require "plugins.scm.ui.readdocview"
+          local title = string.format("[%s...%s].diff", current_branch, branch)
+          core.root_view:get_active_node_default():add_view(ReadDocView(title, diff))
+        else
+          core.warn(
+            "SCM: no changes detected between '%s' and '%s'.",
+            current_branch, branch
+          )
+        end
+      end)
+    end
+    if head_branch or BRANCHES[project_dir] then
+      open_diff_from_head(head_branch or BRANCHES[project_dir])
+    else
+      backend:get_branch(project_dir, function(current_branch)
+        open_diff_from_head(current_branch)
+      end)
+    end
+  else
+    core.warn("SCM: current project directory is not versioned.")
   end
 end
 
@@ -473,6 +511,7 @@ function scm.open_commit_diff(commit, project_dir)
     core.log("SCM: generating the diff please wait...")
     backend:get_commit_diff(commit, project_dir, function(diff)
       if diff and diff ~= "" then
+        local ReadDocView = require "plugins.scm.ui.readdocview"
         local title = string.format("[%s].diff", commit)
         core.root_view:get_active_node_default():add_view(ReadDocView(title, diff))
       else
@@ -483,7 +522,8 @@ function scm.open_commit_diff(commit, project_dir)
 end
 
 ---@param path? string
-function scm.open_commit_history(path)
+---@param branch? string
+function scm.open_commit_history(path, branch)
   local project_dir = util.get_project_dir(path)
   if not project_dir and PROJECTS[path] then
     project_dir = path
@@ -496,14 +536,16 @@ function scm.open_commit_history(path)
     local path_rel = ""
     if path then
       path_rel = common.relative_path(project_dir, path)
+    elseif branch then
+      path_rel = branch
     else
       path_rel = common.basename(project_dir)
     end
     backend:get_commit_history(path, project_dir, function(history)
       if history and type(history) == "table" and #history > 0 then
         -- local title = string.format("%s.diff", path_rel)
-        local HistoryResults = require "plugins.scm.historyresults"
-        local results = HistoryResults(project_dir, path)
+        local HistoryResults = require "plugins.scm.ui.historyresults"
+        local results = HistoryResults(project_dir, path, branch)
         core.root_view:get_active_node_default():add_view(results)
         backend:yield()
         for idx, commit in ipairs(history) do
@@ -520,7 +562,28 @@ function scm.open_commit_history(path)
       else
         core.warn("SCM: no history for '%s'.", path_rel)
       end
+    end, branch)
+  end
+end
+
+---@param project_dir? string
+function scm.open_branches_list(project_dir)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:get_branches(project_dir, function(branches)
+      if branches and type(branches) == "table" and #branches > 0 then
+        local BranchesList = require "plugins.scm.ui.brancheslist"
+        local results = BranchesList(project_dir, backend)
+        core.root_view:get_active_node_default():add_view(results)
+        backend:yield()
+        results:populate(branches, backend)
+      else
+        core.warn("SCM: no branches for '%s'.", common.basename(project_dir))
+      end
     end)
+  else
+    core.warn("SCM: current project directory is not versioned.")
   end
 end
 
@@ -531,6 +594,7 @@ function scm.open_project_status(project_dir)
   if backend then
     backend:get_status(project_dir, function(status)
       if status and status ~= "" then
+        local ReadDocView = require "plugins.scm.ui.readdocview"
         local title = "Project Status"
         core.root_view:get_active_node_default():add_view(ReadDocView(title, status))
       else
@@ -576,6 +640,121 @@ function scm.pull(project_dir)
         core.error("SCM: failed to pull '%s', %s", project_dir, errmsg)
       end
     end)
+  end
+end
+
+---@param project_dir? string
+---@param callback? fun(created:boolean, errmsg:string?)
+function scm.create_branch(project_dir, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:get_branches(project_dir, function(branches)
+      if branches and type(branches) == "table" and #branches > 0 then
+        local CreateBranchDialog = require "plugins.scm.ui.createbranchdialog"
+        table.sort(branches, function(a, b)
+          return (a.date or "") > (b.date or "")
+        end)
+        local dialog = CreateBranchDialog(project_dir, branches)
+        function dialog:on_create(branch, base_branch, checkout)
+          backend:create_branch(branch, base_branch, project_dir, function(success, errmsg)
+            if success then
+              core.log(
+                "SCM: created branch '%s' from '%s' for '%s'",
+                branch,
+                base_branch,
+                project_dir
+              )
+              if checkout then
+                scm.checkout(branch, project_dir)
+              end
+            else
+              MessageBox.error(
+                "SCM Create Branch Failed",
+                {
+                  "Branch: " .. branch .. "\n",
+                  "Base Branch: " .. base_branch .. "\n",
+                  "Project: " .. project_dir .. "\n",
+                  "",
+                  errmsg or "Unknown error"
+                }
+              )
+            end
+            if callback then callback(success, errmsg) end
+          end)
+        end
+        dialog:show()
+      else
+        core.warn("SCM: no branches found for '%s'.", project_dir)
+        if callback then callback(false) end
+      end
+    end)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
+  end
+end
+
+---@param target string Branch, commit or revision to checkout
+---@param project_dir? string
+function scm.checkout(target, project_dir)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:checkout(target, project_dir, function(success, errmsg)
+      if success then
+        core.log("SCM: checked out '%s' for '%s'", target, project_dir)
+      else
+        MessageBox.error(
+          "SCM Checkout Failed",
+          {
+            "Target: " .. target .. "\n",
+            "Project: " .. project_dir .. "\n",
+            "",
+            errmsg or "Unknown error"
+          }
+        )
+      end
+    end)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+  end
+end
+
+---@param branch string Branch to delete
+---@param project_dir? string
+---@param force? boolean Force deletion when supported by the backend
+---@param callback? fun(deleted:boolean, errmsg:string?)
+function scm.delete_branch(branch, project_dir, force, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:delete_branch(branch, project_dir, function(success, errmsg)
+      if success then
+        local action = backend.name == "Fossil"
+          and "closed"
+          or (force and "force deleted" or "deleted")
+        core.log("SCM: %s branch '%s' for '%s'",
+          action,
+          branch,
+          project_dir
+        )
+      else
+        MessageBox.error(
+          "SCM Delete Branch Failed",
+          {
+            "Branch: " .. branch .. "\n",
+            "Project: " .. project_dir .. "\n",
+            "",
+            errmsg or "Unknown error"
+          }
+        )
+      end
+      if callback then callback(success, errmsg) end
+    end, force)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
   end
 end
 
@@ -1221,7 +1400,7 @@ command.add(
       if project_dir and PROJECTS[project_dir] then valid = true end
     end
     if not valid and PROJECTS[core.root_project().path] then
-      valid, project_dir = true, core.root_project().pathz
+      valid, project_dir = true, core.root_project().path
     end
     return valid, project_dir
   end, {
@@ -1241,6 +1420,13 @@ command.add(
       end,
       select_text = true
     })
+  end,
+  ["scm:view-branches"] = function(project_dir)
+    scm.open_branches_list(project_dir)
+  end,
+
+  ["scm:create-branch"] = function(project_dir)
+    scm.create_branch(project_dir)
   end
 })
 
