@@ -23,6 +23,7 @@ local DirWatch = require "core.dirwatch"
 local StatusView = require "core.statusview"
 local Git = require "plugins.scm.backend.git"
 local Fossil = require "plugins.scm.backend.fossil"
+local Widget = require "widget"
 local MessageBox = require "widget.messagebox"
 local diffview_loaded, diffview = pcall(require, "plugins.diffview")
 
@@ -709,25 +710,76 @@ local function request_credentials(project_dir, backend, on_submit, on_cancel)
 end
 
 ---@param project_dir string
+---@param errmsg? string
+---@param on_select fun(strategy:"merge"|"rebase"|"ff-only",remember:boolean)
+---@param on_cancel? fun()
+local function request_pull_strategy(project_dir, errmsg, on_select, on_cancel)
+  local message = {
+    "Git needs a strategy to reconcile divergent branches.",
+    Widget.NEWLINE,
+    "Project: " .. project_dir,
+    Widget.NEWLINE,
+    Widget.NEWLINE,
+    errmsg or "Choose how to continue this pull."
+  }
+  local PullStrategyDialog = require "plugins.scm.ui.pullstrategydialog"
+  local dialog = PullStrategyDialog(project_dir, message)
+  function dialog:on_select(strategy, remember)
+    on_select(strategy, remember)
+  end
+  function dialog:on_cancel()
+    if on_cancel then
+      on_cancel()
+    end
+  end
+  dialog:show()
+end
+
+---@param project_dir string
 function scm.pull(project_dir)
   local backend = PROJECTS[project_dir]
   if backend then
-    local function pull(username, password, retried_with_credentials)
-      backend:pull(project_dir, function(success, errmsg, requires_credentials)
+    local function pull(username, password, retried_with_credentials, strategy)
+      backend:pull(project_dir, function(success, errmsg, requires_credentials, requires_pull_strategy)
         if success then
           core.log("SCM: pulled latest changes for '%s'", project_dir)
         elseif not retried_with_credentials and (
           requires_credentials or backend:requires_credentials(errmsg)
         ) then
           request_credentials(project_dir, backend, function(user, pass)
-            pull(user, pass, true)
+            pull(user, pass, true, strategy)
           end, function()
             core.warn("SCM: pull cancelled, credentials not provided.")
+          end)
+        elseif not strategy and (
+          requires_pull_strategy or backend:requires_pull_strategy(errmsg)
+        ) then
+          request_pull_strategy(project_dir, errmsg, function(selected_strategy, remember)
+            if remember then
+              backend:set_pull_strategy(project_dir, selected_strategy, function(ok, config_errmsg)
+                if ok then
+                  pull(username, password, retried_with_credentials, selected_strategy)
+                else
+                  MessageBox.error(
+                    "SCM Pull Strategy Failed",
+                    {
+                      "Project: " .. project_dir .. "\n",
+                      "",
+                      config_errmsg or "Unknown error"
+                    }
+                  )
+                end
+              end)
+            else
+              pull(username, password, retried_with_credentials, selected_strategy)
+            end
+          end, function()
+            core.warn("SCM: pull cancelled, strategy not selected.")
           end)
         else
           core.error("SCM: failed to pull '%s', %s", project_dir, errmsg)
         end
-      end, username, password)
+      end, username, password, strategy)
     end
     pull()
   end

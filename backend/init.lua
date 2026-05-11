@@ -69,8 +69,8 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetstaged fun(files?:table<string,boolean>, cached?:boolean)
 ---@alias plugins.scm.backend.ongetstats fun(stats?:plugins.scm.backend.stats, cached?:boolean)
 ---@alias plugins.scm.backend.ongetstatus fun(status?:string, cached?:boolean)
----@alias plugins.scm.backend.onnewcommit fun(status?:string, cached?:boolean)
----@alias plugins.scm.backend.onexecstatus fun(success:boolean, errmsg?:string, requires_credentials?:boolean)
+---@alias plugins.scm.backend.onnewcommit fun(status?:string, cached?:boolean), requires_credentials?:boolean)
+---@alias plugins.scm.backend.onexecstatus fun(success:boolean, errmsg?:string, requires_credentials?:boolean, requires_pull_strategy?:boolean)
 
 ---Base functionality to implement a SCM backend with async support.
 ---@class plugins.scm.backend : core.object
@@ -501,8 +501,9 @@ function Backend:new_commit(directory, message, callback) callback(nil) end
 ---@param callback plugins.scm.backend.onexecstatus
 ---@param username? string
 ---@param password? string
+---@param strategy? "merge"|"rebase"|"ff-only"
 ---@diagnostic disable-next-line
-function Backend:pull(directory, callback, username, password) callback(false, "not implemented") end
+function Backend:pull(directory, callback, username, password, strategy) callback(false, "not implemented") end
 
 ---Fetch remote references without updating the current checkout.
 ---@param directory string Project directory
@@ -527,6 +528,18 @@ function Backend:requires_credentials(errmsg) return false end
 ---@param callback fun(username?:string)
 ---@diagnostic disable-next-line
 function Backend:get_username(directory, callback) callback(nil) end
+
+---Report if a backend error can be retried after choosing a pull strategy.
+---@param errmsg? string
+---@return boolean
+function Backend:requires_pull_strategy(errmsg) return false end
+
+---Set the backend's default pull strategy for this repository.
+---@param directory string Project directory
+---@param strategy "merge"|"rebase"|"ff-only"
+---@param callback plugins.scm.backend.onexecstatus
+---@diagnostic disable-next-line
+function Backend:set_pull_strategy(directory, strategy, callback) callback(false, "not implemented") end
 
 ---Restore a file to its previous HEAD state before any changes.
 ---@param file string Absolute path to file

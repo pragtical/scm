@@ -799,8 +799,19 @@ end
 
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
-function Git:pull(directory, callback)
+---@param username? string Ignored by Git
+---@param password? string Ignored by Git
+---@param strategy? "merge"|"rebase"|"ff-only"
+function Git:pull(directory, callback, username, password, strategy)
   directory = git_repo_dir(directory)
+  local params = { "pull" }
+  if strategy == "merge" then
+    table.insert(params, "--no-rebase")
+  elseif strategy == "rebase" then
+    table.insert(params, "--rebase")
+  elseif strategy == "ff-only" then
+    table.insert(params, "--ff-only")
+  end
   self:execute(function(proc)
     local success = false
     local errmsg = ""
@@ -815,8 +826,60 @@ function Git:pull(directory, callback)
         errmsg = stdout
       end
     end
-    callback(success, errmsg)
-  end, directory, "pull")
+    callback(success, errmsg, false, self:requires_pull_strategy(errmsg))
+  end, directory, table.unpack(params))
+end
+
+---@param errmsg? string
+---@return boolean
+function Git:requires_pull_strategy(errmsg)
+  errmsg = (errmsg or ""):lower()
+  return errmsg:find("divergent branches", 1, true) ~= nil
+    and errmsg:find("need to specify how to reconcile", 1, true) ~= nil
+end
+
+---@param proc process
+---@param callback plugins.scm.backend.onexecstatus
+function Git:handle_exec_status(proc, callback)
+  local success = false
+  local errmsg = ""
+  local stdout = self:get_process_output(proc, "stdout")
+  local stderr = self:get_process_output(proc, "stderr")
+  if proc:returncode() == 0 then
+    success = true
+  else
+    if stderr ~= "" then
+      errmsg = stderr
+    elseif stdout ~= "" then
+      errmsg = stdout
+    end
+  end
+  callback(success, errmsg)
+end
+
+---@param directory string Project directory
+---@param strategy "merge"|"rebase"|"ff-only"
+---@param callback plugins.scm.backend.onexecstatus
+function Git:set_pull_strategy(directory, strategy, callback)
+  directory = git_repo_dir(directory)
+  local params = { "config" }
+  if strategy == "merge" then
+    table.insert(params, "pull.rebase")
+    table.insert(params, "false")
+  elseif strategy == "rebase" then
+    table.insert(params, "pull.rebase")
+    table.insert(params, "true")
+  elseif strategy == "ff-only" then
+    table.insert(params, "pull.ff")
+    table.insert(params, "only")
+  else
+    callback(false, "Unknown pull strategy: " .. tostring(strategy))
+    return
+  end
+
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, directory, table.unpack(params))
 end
 
 ---@param directory string Project directory

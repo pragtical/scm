@@ -747,7 +747,8 @@ end
 ---@param callback plugins.scm.backend.onexecstatus
 ---@param username? string
 ---@param password? string
-function Fossil:pull(directory, callback, username, password)
+---@param strategy? "merge"|"rebase"|"ff-only" Ignored by Fossil
+function Fossil:pull(directory, callback, username, password, strategy)
   if self:has_credentials(username, password) then
     self:get_authenticated_remote_url(directory, username, password, function(url, errmsg)
       if not url then
