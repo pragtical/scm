@@ -349,6 +349,18 @@ command.add(
     end)
   end,
 
+  ["scm-branches:rebase"] = function(bl)
+    ---@cast bl plugins.scm.ui.BranchesList
+    local data = bl:get_selected_data()
+    if data and not data.remote_only then
+      scm.open_rebase_branch_dialog(data, bl.project_dir, function(rebased)
+        if rebased then
+          bl:refresh()
+        end
+      end)
+    end
+  end,
+
   ["scm-branches:refresh-from-remote"] = function(bl)
     ---@cast bl plugins.scm.ui.BranchesList
     refresh_from_remote(bl)
@@ -376,6 +388,18 @@ BranchesList.menu:register(
     { text = "View Branch History", command = "scm-branches:view-history" },
     { text = "Copy Commit Hash", command = "scm-branches:copy-commit-hash" },
     { text = "Checkout Branch", command = "scm-branches:checkout" },
+    ContextMenu.DIVIDER
+})
+
+BranchesList.menu:register(
+  function()
+    return core.active_view:is(BranchesList)
+      and not core.active_view.searching
+      and core.active_view:get_selected_data()
+      and not core.active_view:get_selected_data().remote_only
+      and core.active_view.backend:supports_rebase_branch()
+  end, {
+    { text = "Rebase Branch...", command = "scm-branches:rebase" },
     ContextMenu.DIVIDER
 })
 

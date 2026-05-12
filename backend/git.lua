@@ -301,6 +301,47 @@ function Git:create_branch(branch, base_branch, directory, callback)
   end, directory, "branch", branch, base_branch)
 end
 
+---@param branch string Branch to rebase
+---@param base_branch string Branch or revision to rebase onto
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onrebasestatus
+---@param strategy? plugins.scm.backend.rebasestrategy
+function Git:rebase_branch(branch, base_branch, directory, callback, strategy)
+  directory = git_repo_dir(directory)
+  local params = { "--no-optional-locks", "rebase" }
+  if strategy == "ours" or strategy == "theirs" then
+    table.insert(params, "-X")
+    table.insert(params, strategy)
+  elseif strategy and strategy ~= "normal" then
+    callback(false, "Unknown rebase strategy: " .. tostring(strategy), false)
+    return
+  end
+  table.insert(params, base_branch)
+  table.insert(params, branch)
+
+  self:execute(function(proc)
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg, self:requires_rebase_resolution(errmsg))
+  end, directory, table.unpack(params))
+end
+
+---@return boolean
+function Git:supports_rebase_branch()
+  return true
+end
+
 ---@param tag string Tag to create
 ---@param target string Branch, tag, commit or revision to tag
 ---@param directory string Project directory
@@ -871,6 +912,18 @@ function Git:requires_pull_strategy(errmsg)
   errmsg = (errmsg or ""):lower()
   return errmsg:find("divergent branches", 1, true) ~= nil
     and errmsg:find("need to specify how to reconcile", 1, true) ~= nil
+end
+
+---@param errmsg? string
+---@return boolean
+function Git:requires_rebase_resolution(errmsg)
+  errmsg = (errmsg or ""):lower()
+  return errmsg:find("conflict", 1, true) ~= nil
+    and (
+      errmsg:find("rebase --continue", 1, true) ~= nil
+      or errmsg:find("resolve all conflicts", 1, true) ~= nil
+      or errmsg:find("could not apply", 1, true) ~= nil
+    )
 end
 
 ---@param proc process

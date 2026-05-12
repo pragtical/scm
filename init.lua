@@ -1007,6 +1007,96 @@ function scm.create_branch(project_dir, callback)
   end
 end
 
+---@param branch string Branch to rebase
+---@param base_branch string Branch or revision to rebase onto
+---@param project_dir? string
+---@param strategy? plugins.scm.backend.rebasestrategy
+---@param callback? fun(rebased:boolean, errmsg:string?)
+function scm.rebase_branch(branch, base_branch, project_dir, strategy, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:rebase_branch(branch, base_branch, project_dir, function(success, errmsg, requires_resolution)
+      if success then
+        core.log(
+          "SCM: rebased branch '%s' onto '%s' for '%s'",
+          branch,
+          base_branch,
+          project_dir
+        )
+      elseif requires_resolution or backend:requires_rebase_resolution(errmsg) then
+        MessageBox.error(
+          "SCM Rebase Stopped",
+          {
+            "The rebase stopped because conflicts need manual resolution.",
+            Widget.NEWLINE,
+            "Branch: " .. branch,
+            Widget.NEWLINE,
+            "Base Branch: " .. base_branch,
+            Widget.NEWLINE,
+            "Project: " .. project_dir,
+            Widget.NEWLINE,
+            Widget.NEWLINE,
+            errmsg or "Resolve conflicts, then continue or abort the rebase with your SCM."
+          }
+        )
+      else
+        MessageBox.error(
+          "SCM Rebase Branch Failed",
+          {
+            "Branch: " .. branch,
+            Widget.NEWLINE,
+            "Base Branch: " .. base_branch,
+            Widget.NEWLINE,
+            "Project: " .. project_dir,
+            Widget.NEWLINE,
+            Widget.NEWLINE,
+            errmsg or "Unknown error"
+          }
+        )
+      end
+      if callback then callback(success, errmsg) end
+    end, strategy)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
+  end
+end
+
+---@param branch_data plugins.scm.backend.branch
+---@param project_dir? string
+---@param callback? fun(rebased:boolean, errmsg:string?)
+function scm.open_rebase_branch_dialog(branch_data, project_dir, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    if not backend:supports_rebase_branch() then
+      MessageBox.error("SCM Rebase Branch", "This backend does not support branch rebasing.")
+      if callback then callback(false) end
+      return
+    end
+    backend:get_branches(project_dir, function(branches)
+      if branches and type(branches) == "table" and #branches > 1 then
+        local RebaseBranchDialog = require "plugins.scm.ui.rebasebranchdialog"
+        table.sort(branches, function(a, b)
+          return (a.date or "") > (b.date or "")
+        end)
+        local dialog = RebaseBranchDialog(project_dir, branch_data, branches)
+        function dialog:on_rebase(branch, base_branch, strategy)
+          scm.rebase_branch(branch, base_branch, project_dir, strategy, callback)
+        end
+        dialog:show()
+      else
+        core.warn("SCM: no base branches found for '%s'.", project_dir)
+        if callback then callback(false) end
+      end
+    end)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
+  end
+end
+
 ---@param project_dir? string
 ---@param callback? fun(created:boolean, errmsg:string?)
 function scm.create_tag(project_dir, callback)

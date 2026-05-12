@@ -72,6 +72,8 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetstatus fun(status?:string, cached?:boolean)
 ---@alias plugins.scm.backend.onnewcommit plugins.scm.backend.onexecstatus
 ---@alias plugins.scm.backend.onexecstatus fun(success:boolean, errmsg?:string, requires_credentials?:boolean, requires_pull_strategy?:boolean)
+---@alias plugins.scm.backend.rebasestrategy "normal"|"ours"|"theirs"
+---@alias plugins.scm.backend.onrebasestatus fun(success:boolean, errmsg?:string, requires_rebase_resolution?:boolean)
 
 ---Base functionality to implement a SCM backend with async support.
 ---@class plugins.scm.backend : core.object
@@ -394,6 +396,19 @@ function Backend:get_tags(directory, callback) callback(nil) end
 ---@diagnostic disable-next-line
 function Backend:create_branch(branch, base_branch, directory, callback) callback(false, "not implemented") end
 
+---Rebase a branch onto another branch or revision.
+---@param branch string Branch to rebase
+---@param base_branch string Branch or revision to rebase onto
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onrebasestatus
+---@param strategy? plugins.scm.backend.rebasestrategy Conflict strategy when supported
+---@diagnostic disable-next-line
+function Backend:rebase_branch(branch, base_branch, directory, callback, strategy) callback(false, "not implemented") end
+
+---Report if rebasing branches is supported.
+---@return boolean
+function Backend:supports_rebase_branch() return false end
+
 ---Create a new tag from the given target revision.
 ---@param tag string Tag to create
 ---@param target string Branch, tag, commit or revision to tag
@@ -589,6 +604,11 @@ function Backend:get_username(directory, callback) callback(nil) end
 ---@param errmsg? string
 ---@return boolean
 function Backend:requires_pull_strategy(errmsg) return false end
+
+---Report if a backend error means a rebase stopped for manual resolution.
+---@param errmsg? string
+---@return boolean
+function Backend:requires_rebase_resolution(errmsg) return false end
 
 ---Set the backend's default pull strategy for this repository.
 ---@param directory string Project directory
