@@ -592,11 +592,11 @@ end
 ---@param callback fun(commit?:string)
 function Fossil:get_current_commit(directory, callback)
   self:execute(function(proc)
+    local stdout = self:get_process_output(proc, "stdout")
     if not proc or proc:returncode() ~= 0 then
       callback(nil)
       return
     end
-    local stdout = self:get_process_output(proc, "stdout")
     callback(stdout:match("checkout:%s+([a-zA-Z0-9]+)"))
   end, directory, "info")
 end

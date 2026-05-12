@@ -667,11 +667,11 @@ end
 function Git:get_current_commit(directory, callback)
   directory = git_repo_dir(directory)
   self:execute(function(proc)
+    local stdout = self:get_process_output(proc, "stdout")
     if not proc or proc:returncode() ~= 0 then
       callback(nil)
       return
     end
-    local stdout = self:get_process_output(proc, "stdout")
     callback(stdout:match("^%s*(%S+)"))
   end, directory, "--no-optional-locks", "rev-parse", "HEAD")
 end
