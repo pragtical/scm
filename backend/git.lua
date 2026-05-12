@@ -174,6 +174,18 @@ function Git:get_staged(directory, callback)
   end, directory, "--no-optional-locks", "diff", "--name-only", "--cached")
 end
 
+---@param directory string Project directory
+---@param callback fun(has_changes:boolean)
+function Git:has_commit_changes(directory, callback)
+  self:get_staged(directory, function(staged_files)
+    for _ in pairs(staged_files or {}) do
+      callback(true)
+      return
+    end
+    callback(false)
+  end)
+end
+
 ---@param callback plugins.scm.backend.ongetbranch
 function Git:get_branch(directory, callback)
   directory = git_repo_dir(directory)
@@ -608,6 +620,20 @@ function Git:get_commit_info(id, directory, callback)
   end, directory, "--no-optional-locks", "show", "--no-patch", id)
 end
 
+---@param directory string Project directory
+---@param callback fun(commit?:string)
+function Git:get_current_commit(directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    if not proc or proc:returncode() ~= 0 then
+      callback(nil)
+      return
+    end
+    local stdout = self:get_process_output(proc, "stdout")
+    callback(stdout:match("^%s*(%S+)"))
+  end, directory, "--no-optional-locks", "rev-parse", "HEAD")
+end
+
 ---@param id string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
@@ -784,17 +810,37 @@ end
 ---@param message string Commit message
 ---@param callback plugins.scm.backend.onnewcommit
 function Git:new_commit(directory, message, callback)
-  self:execute(function(proc)
-    local status = ""
-    local stdout = self:get_process_output(proc, "stdout")
-    local stderr = self:get_process_output(proc, "stderr")
-    if stderr ~= "" then
-      status = stderr
-    elseif stdout ~= "" then
-      status = stdout
+  directory = git_repo_dir(directory)
+  self:with_commit_message_file(message, function(filename, cleanup, errmsg)
+    if not filename then
+      callback(false, errmsg or "Could not create temporary commit message file.")
+      return
     end
-    callback(status)
-  end, directory, "commit", "-m", message)
+    local started = self:execute(function(proc)
+      self:handle_exec_status(proc, callback)
+      if cleanup then cleanup() end
+    end, directory, "--no-optional-locks", "commit", "-F", filename)
+    if not started and cleanup then cleanup() end
+  end)
+end
+
+---@param directory string Project directory
+---@param commit string Current commit hash
+---@param message string Commit message
+---@param callback plugins.scm.backend.onexecstatus
+function Git:amend_commit(directory, commit, message, callback)
+  directory = git_repo_dir(directory)
+  self:with_commit_message_file(message, function(filename, cleanup, errmsg)
+    if not filename then
+      callback(false, errmsg or "Could not create temporary commit message file.")
+      return
+    end
+    local started = self:execute(function(proc)
+      self:handle_exec_status(proc, callback)
+      if cleanup then cleanup() end
+    end, directory, "--no-optional-locks", "commit", "--amend", "-F", filename)
+    if not started and cleanup then cleanup() end
+  end)
 end
 
 ---@param directory string Project directory
@@ -841,6 +887,10 @@ end
 ---@param proc process
 ---@param callback plugins.scm.backend.onexecstatus
 function Git:handle_exec_status(proc, callback)
+  if not proc then
+    callback(false, "Could not start Git process.")
+    return
+  end
   local success = false
   local errmsg = ""
   local stdout = self:get_process_output(proc, "stdout")

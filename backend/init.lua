@@ -69,7 +69,7 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetstaged fun(files?:table<string,boolean>, cached?:boolean)
 ---@alias plugins.scm.backend.ongetstats fun(stats?:plugins.scm.backend.stats, cached?:boolean)
 ---@alias plugins.scm.backend.ongetstatus fun(status?:string, cached?:boolean)
----@alias plugins.scm.backend.onnewcommit fun(status?:string, cached?:boolean), requires_credentials?:boolean)
+---@alias plugins.scm.backend.onnewcommit plugins.scm.backend.onexecstatus
 ---@alias plugins.scm.backend.onexecstatus fun(success:boolean, errmsg?:string, requires_credentials?:boolean, requires_pull_strategy?:boolean)
 
 ---Base functionality to implement a SCM backend with async support.
@@ -253,7 +253,7 @@ end
 ---@param directory string Path of project directory
 ---@param ... string parameters to pass to associated command
 function Backend:execute(callback, directory, ...)
-  if not self.command then return end
+  if not self.command then return false end
   local command = table.pack(self.command, ...)
   local options = self:get_process_options(directory)
   local proc, errmsg, errcode
@@ -277,6 +277,32 @@ function Backend:execute(callback, directory, ...)
       table.unpack(msg_code)
     )
   end
+  return proc ~= nil
+end
+
+---Write a commit message to a temporary file and run a callback with its path.
+---@param message string Commit message
+---@param callback fun(filename?:string, cleanup?:fun(), errmsg?:string)
+function Backend:with_commit_message_file(message, callback)
+  local temp_dir = os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP")
+    or (PLATFORM == "Windows" and nil or "/tmp")
+  local filename = temp_dir
+    and core.temp_filename(".scm-commit-message", temp_dir)
+    or core.temp_filename(".scm-commit-message")
+  local file, errmsg = io.open(filename, "wb")
+  if not file and temp_dir then
+    filename = core.temp_filename(".scm-commit-message")
+    file, errmsg = io.open(filename, "wb")
+  end
+  if not file then
+    callback(nil, nil, errmsg)
+    return
+  end
+  file:write(message)
+  file:close()
+  callback(filename, function()
+    os.remove(filename)
+  end)
 end
 
 ---Build process options for SCM command execution.
@@ -325,6 +351,21 @@ function Backend:unstage_file(file, directory, callback) callback(false, "not im
 ---@param callback plugins.scm.backend.ongetstaged
 ---@diagnostic disable-next-line
 function Backend:get_staged(directory, callback) callback(nil) end
+
+---Report if there are changes that can be committed.
+---@param directory string Project directory
+---@param callback fun(has_changes:boolean)
+function Backend:has_commit_changes(directory, callback)
+  self:get_changes(directory, function(changes)
+    for _, change in ipairs(changes or {}) do
+      if change.status ~= "untracked" then
+        callback(true)
+        return
+      end
+    end
+    callback(false)
+  end)
+end
 
 ---Retrieve the current branch.
 ---@param directory string Project directory
@@ -418,6 +459,12 @@ function Backend:get_commit_history(path, directory, callback, target, target_ty
 ---@diagnostic disable-next-line
 function Backend:get_commit_info(id, directory, callback) callback(nil) end
 
+---Retrieve the current checked out commit.
+---@param directory string Project directory
+---@param callback fun(commit?:string)
+---@diagnostic disable-next-line
+function Backend:get_current_commit(directory, callback) callback(nil) end
+
 ---Retrieve the diff for a given commit.
 ---@param id string Hash of the commit
 ---@param directory string Project directory
@@ -493,7 +540,15 @@ function Backend:get_status(directory, callback) callback(nil) end
 ---@param message string Commit message
 ---@param callback plugins.scm.backend.onnewcommit
 ---@diagnostic disable-next-line
-function Backend:new_commit(directory, message, callback) callback(nil) end
+function Backend:new_commit(directory, message, callback) callback(false, "not implemented") end
+
+---Amend the current commit.
+---@param directory string Project directory
+---@param commit string Current commit hash
+---@param message string Commit message
+---@param callback plugins.scm.backend.onexecstatus
+---@diagnostic disable-next-line
+function Backend:amend_commit(directory, commit, message, callback) callback(false, "not implemented") end
 
 ---Pull latest changes.
 ---TODO: this is a WIP we should handle remote and branch

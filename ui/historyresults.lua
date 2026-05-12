@@ -26,7 +26,8 @@ local scm
 ---@field private list widget.listbox
 ---@field private target string?
 ---@field private target_type "branch"|"tag"?
----@overload fun(project_dir:string,path?:string,target?:string,target_type?:"branch"|"tag"):plugins.scm.ui.HistoryResults
+---@field private current_commit string?
+---@overload fun(project_dir:string,path?:string,target?:string,target_type?:"branch"|"tag",backend?:plugins.scm.backend):plugins.scm.ui.HistoryResults
 local HistoryResults = Widget:extend()
 
 ---@type core.contextmenu
@@ -37,7 +38,8 @@ HistoryResults.menu = ContextMenu()
 ---@param path? string
 ---@param target? string
 ---@param target_type? "branch"|"tag"
-function HistoryResults:new(project_dir, path, target, target_type)
+---@param backend? plugins.scm.backend
+function HistoryResults:new(project_dir, path, target, target_type, backend)
   HistoryResults.super.new(self)
 
   -- close when automatically loaded from workspace plugin
@@ -62,6 +64,7 @@ function HistoryResults:new(project_dir, path, target, target_type)
   self.is_file = false
   self.target = target
   self.target_type = target_type or (target and "branch" or nil)
+  self.current_commit = nil
 
   self.searching = true
   if path then
@@ -114,6 +117,12 @@ function HistoryResults:new(project_dir, path, target, target_type)
   self.border.width = 0
   self:set_size(200, 200)
   self:show()
+
+  if backend then
+    backend:get_current_commit(project_dir, function(commit)
+      self.current_commit = commit
+    end)
+  end
 end
 
 ---@return plugins.scm.backend.commit? commit_data
@@ -123,6 +132,17 @@ function HistoryResults:get_selected_data()
     return self.list:get_row_data(idx)
   end
   return nil
+end
+
+---@return boolean
+function HistoryResults:selected_is_current_commit()
+  local data = self:get_selected_data()
+  if not data or not data.hash or not self.current_commit then
+    return false
+  end
+  return data.hash == self.current_commit
+    or data.hash:find(self.current_commit, 1, true) == 1
+    or self.current_commit:find(data.hash, 1, true) == 1
 end
 
 function HistoryResults:on_mouse_pressed(button, x, y, clicks)
@@ -236,6 +256,22 @@ command.add(
 command.add(
   function()
     return core.active_view:is(HistoryResults)
+      and not core.active_view.searching
+      and core.active_view:selected_is_current_commit(),
+      core.active_view
+  end, {
+  ["scm-history:amend-current-commit"] = function(hr)
+    ---@cast hr plugins.scm.ui.HistoryResults
+    local data = hr:get_selected_data()
+    if data then
+      scm.open_amend_commit_message(hr.project_dir, data.hash)
+    end
+  end
+})
+
+command.add(
+  function()
+    return core.active_view:is(HistoryResults)
       and not core.active_view.searching and core.active_view.is_file,
       core.active_view
   end, {
@@ -256,6 +292,7 @@ HistoryResults.menu:register(
       and not core.active_view.searching
   end, {
     { text = "View Diff", command = "scm-history:view-diff" },
+    { text = "Amend Current Commit", command = "scm-history:amend-current-commit" },
     { text = "Copy Commit Hash", command = "scm-history:copy-commit-hash" }
 })
 

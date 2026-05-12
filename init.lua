@@ -584,7 +584,7 @@ function scm.open_commit_history(path, target, target_type)
       if history and type(history) == "table" and #history > 0 then
         -- local title = string.format("%s.diff", path_rel)
         local HistoryResults = require "plugins.scm.ui.historyresults"
-        local results = HistoryResults(project_dir, path, target, target_type)
+        local results = HistoryResults(project_dir, path, target, target_type, backend)
         core.root_view:get_active_node_default():add_view(results)
         backend:yield()
         for idx, commit in ipairs(history) do
@@ -667,24 +667,134 @@ function scm.open_project_status(project_dir)
 end
 
 ---@param project_dir? string
----@param message string
-function scm.new_commit(project_dir, message)
+function scm.open_commit_message(project_dir)
   project_dir = project_dir or util.get_current_project()
   local backend = PROJECTS[project_dir]
   if backend then
-    backend:new_commit(project_dir, message, function(status)
-      if status and status ~= "" then
-        local title = "New commit"
-          ---@type plugins.scm.readdoc
-          local doc = ReadDoc(title, title)
-          doc:set_text(status)
-          core.root_view:open_doc(doc)
-      else
-        core.warn("SCM: no status to report.")
+    backend:has_commit_changes(project_dir, function(has_changes)
+      if not has_changes then
+        MessageBox.info(
+          "SCM Commit",
+          "No changes are staged or tracked for commit."
+        )
+        return
       end
+      backend:get_status(project_dir, function(status)
+        local CommitMessageView = require "plugins.scm.ui.commitmessageview"
+        core.root_view:get_active_node_default():add_view(
+          CommitMessageView(project_dir, backend, status)
+        )
+      end)
     end)
   else
     core.warn("SCM: current project directory is not versioned.")
+  end
+end
+
+---@param project_dir? string
+---@param commit? string
+function scm.open_amend_commit_message(project_dir, commit)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if not backend then
+    core.warn("SCM: current project directory is not versioned.")
+    return
+  end
+
+  local function open_editor(current_commit)
+    if not current_commit then
+      core.warn("SCM: could not determine current commit.")
+      return
+    end
+    backend:get_commit_info(current_commit, project_dir, function(info)
+      local message = ""
+      if info then
+        message = info.summary or ""
+        if info.message and info.message ~= "" then
+          message = message .. "\n\n" .. info.message
+        end
+      end
+      backend:get_status(project_dir, function(status)
+        local CommitMessageView = require "plugins.scm.ui.commitmessageview"
+        core.root_view:get_active_node_default():add_view(
+          CommitMessageView(project_dir, backend, status, "amend", current_commit, message)
+        )
+      end)
+    end)
+  end
+
+  backend:get_current_commit(project_dir, function(current_commit)
+    if commit and current_commit then
+      local matches_current = commit == current_commit
+        or commit:find(current_commit, 1, true) == 1
+        or current_commit:find(commit, 1, true) == 1
+      if not matches_current then
+        core.warn("SCM: amend is only supported for the current commit.")
+        return
+      end
+    end
+    open_editor(current_commit or commit)
+  end)
+end
+
+---@param project_dir? string
+---@param message string
+---@param callback? plugins.scm.backend.onnewcommit
+function scm.commit(project_dir, message, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:new_commit(project_dir, message, function(success, errmsg)
+      if success then
+        core.log("SCM: committed changes in '%s'", project_dir)
+        scm.update()
+      else
+        errmsg = errmsg and errmsg ~= "" and errmsg or "Commit failed."
+        core.error("SCM: failed to commit '%s', %s", project_dir, errmsg)
+        MessageBox.error("SCM Commit Failed", errmsg)
+      end
+      if callback then callback(success, errmsg) end
+    end)
+  else
+    local errmsg = "Current project directory is not versioned."
+    core.warn("SCM: %s", errmsg)
+    if callback then callback(false, errmsg) end
+  end
+end
+
+---@param project_dir? string
+---@param commit string
+---@param message string
+---@param callback? plugins.scm.backend.onexecstatus
+function scm.amend_commit(project_dir, commit, message, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    backend:amend_commit(project_dir, commit, message, function(success, errmsg)
+      if success then
+        core.log("SCM: amended commit in '%s'", project_dir)
+        scm.update()
+      else
+        errmsg = errmsg and errmsg ~= "" and errmsg or "Amend commit failed."
+        core.error("SCM: failed to amend commit '%s', %s", project_dir, errmsg)
+        MessageBox.error("SCM Amend Commit Failed", errmsg)
+      end
+      if callback then callback(success, errmsg) end
+    end)
+  else
+    local errmsg = "Current project directory is not versioned."
+    core.warn("SCM: %s", errmsg)
+    if callback then callback(false, errmsg) end
+  end
+end
+
+---@param project_dir? string
+---@param message? string
+function scm.new_commit(project_dir, message)
+  if message then
+    scm.commit(project_dir, message)
+  else
+    scm.open_commit_message(project_dir)
   end
 end
 
@@ -1720,13 +1830,13 @@ command.add(
   end,
 
   ["scm:new-commit"] = function(project_dir)
-    core.command_view:enter("Commit message", {
-      submit = function(message)
-        scm.new_commit(project_dir, message)
-      end,
-      select_text = true
-    })
+    scm.open_commit_message(project_dir)
   end,
+
+  ["scm:amend-current-commit"] = function(project_dir)
+    scm.open_amend_commit_message(project_dir)
+  end,
+
   ["scm:view-branches"] = function(project_dir)
     scm.open_branches_list(project_dir)
   end,

@@ -28,6 +28,10 @@ end
 ---@param proc process
 ---@param callback plugins.scm.backend.onexecstatus
 function Fossil:handle_exec_status(proc, callback)
+  if not proc then
+    callback(false, "Could not start Fossil process.")
+    return
+  end
   local success = false
   local errmsg = ""
   local stdout = self:get_process_output(proc, "stdout")
@@ -578,6 +582,19 @@ function Fossil:get_commit_info(id, directory, callback)
   end, directory, "info", id)
 end
 
+---@param directory string Project directory
+---@param callback fun(commit?:string)
+function Fossil:get_current_commit(directory, callback)
+  self:execute(function(proc)
+    if not proc or proc:returncode() ~= 0 then
+      callback(nil)
+      return
+    end
+    local stdout = self:get_process_output(proc, "stdout")
+    callback(stdout:match("checkout:%s+([a-zA-Z0-9]+)"))
+  end, directory, "info")
+end
+
 ---@param id string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
@@ -741,6 +758,41 @@ function Fossil:get_status(directory, callback)
     end
     callback(status)
   end, directory, "status")
+end
+
+---@param directory string Project directory
+---@param message string Commit message
+---@param callback plugins.scm.backend.onnewcommit
+function Fossil:new_commit(directory, message, callback)
+  self:with_commit_message_file(message, function(filename, cleanup, errmsg)
+    if not filename then
+      callback(false, errmsg or "Could not create temporary commit message file.")
+      return
+    end
+    local started = self:execute(function(proc)
+      self:handle_exec_status(proc, callback)
+      if cleanup then cleanup() end
+    end, directory, "commit", "-M", filename)
+    if not started and cleanup then cleanup() end
+  end)
+end
+
+---@param directory string Project directory
+---@param commit string Current commit hash
+---@param message string Commit message
+---@param callback plugins.scm.backend.onexecstatus
+function Fossil:amend_commit(directory, commit, message, callback)
+  self:with_commit_message_file(message, function(filename, cleanup, errmsg)
+    if not filename then
+      callback(false, errmsg or "Could not create temporary commit message file.")
+      return
+    end
+    local started = self:execute(function(proc)
+      self:handle_exec_status(proc, callback)
+      if cleanup then cleanup() end
+    end, directory, "amend", commit, "-M", filename)
+    if not started and cleanup then cleanup() end
+  end)
 end
 
 ---@param directory string Project directory
