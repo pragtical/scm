@@ -485,9 +485,17 @@ end
 function Fossil:get_changes(directory, callback)
   directory = directory:gsub("[/\\]$", "")
   self:execute(function(proc)
+    if not proc then
+      callback(nil)
+      return
+    end
     ---@type plugins.scm.backend.filechange[]
     local changes = {}
     local output = self:get_process_output(proc, "stdout")
+    if proc:returncode() ~= 0 then
+      callback(nil)
+      return
+    end
     local iterations = 1
     for line in output:gmatch("[^\n]+") do
       if line ~= "" then

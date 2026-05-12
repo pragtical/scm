@@ -279,9 +279,10 @@ local function update_doc_status(path, nonblocking)
             CHANGES[project_dir][path] = nil
           end
         end
+        core.redraw = true
       end
     end)
-    if not nonblocking then backend:set_blocking_mode(true) end
+    if not nonblocking then backend:set_blocking_mode(false) end
   end
 end
 
@@ -1538,6 +1539,10 @@ function scm.update()
 
           project_backend:get_changes(project_dir, function(filechanges, cached)
             if cached then return end
+            if type(filechanges) ~= "table" then
+              scm_update_running = false
+              return
+            end
             local changed_files = {}
             for i, change in ipairs(filechanges) do
               local color = style.modified
@@ -1575,6 +1580,7 @@ function scm.update()
             end
             CHANGES[project_dir] = changed_files
             scm_update_running = false
+            core.redraw = true
           end)
         end)
       end)

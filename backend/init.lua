@@ -62,7 +62,7 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.ongetbranch fun(branch?:string, cached?:boolean)
 ---@alias plugins.scm.backend.ongetbranches fun(branches?:plugins.scm.backend.branch[], cached?:boolean)
 ---@alias plugins.scm.backend.ongettags fun(tags?:plugins.scm.backend.tag[], cached?:boolean)
----@alias plugins.scm.backend.ongetchanges fun(changes:plugins.scm.backend.filechange[], cached?:boolean)
+---@alias plugins.scm.backend.ongetchanges fun(changes?:plugins.scm.backend.filechange[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommithistory fun(changes?:plugins.scm.backend.commit[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommit fun(changes:plugins.scm.backend.commit, cached?:boolean)
 ---@alias plugins.scm.backend.ongetfilestatus fun(status?:plugins.scm.backend.filestatus, cached?:boolean)

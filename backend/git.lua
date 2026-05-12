@@ -494,6 +494,10 @@ end
 local function get_changes(self, directory, changes, callback)
   self:get_staged(directory, function(staged_files)
     self:execute(function(proc)
+      if not proc then
+        if callback then callback(false) end
+        return
+      end
       ---@type plugins.scm.backend.filechange[]
       local added = {}
       for idx, line in self:get_process_lines(proc, "stdout") do
@@ -526,8 +530,12 @@ local function get_changes(self, directory, changes, callback)
           self:yield()
         end
       end
+      if proc:returncode() ~= 0 then
+        if callback then callback(false) end
+        return
+      end
       if callback then
-        callback()
+        callback(true)
       end
     end, directory, "--no-optional-locks", "status", "--short")
   end)
@@ -539,9 +547,17 @@ function Git:get_changes(directory, callback)
   directory = directory:gsub("[/\\]$", "")
   directory = git_repo_dir(directory)
   local changes = {}
-  get_changes(self, directory, changes, function()
+  get_changes(self, directory, changes, function(success)
+    if not success then
+      callback(nil)
+      return
+    end
     -- get available submodule changes
     self:execute(function(proc)
+      if not proc then
+        callback(changes)
+        return
+      end
       local submodules = {}
       local mod_changes_done = {}
       for _, line in self:get_process_lines(proc, "stdout") do
