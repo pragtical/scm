@@ -56,9 +56,11 @@ it will be associated to the project for subsequente use.
 
 There is still missing functionality, but some of the following comes to mind:
 
-- [ ] Push with credentials input
-- [ ] Be able to commit current changes
 - [ ] maybe colorize tabs text depending on the file status
+- [x] Commit current changes
+- [x] Amend last commit
+- [x] Be able to commit current changes
+- [x] Push with credentials input
 - [x] Pull with support for credentials input
 - [x] basic management of branches (list, create, delete, etc...)
 - [x] basic management of tags (list, create, delete, etc...)
