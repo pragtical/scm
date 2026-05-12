@@ -76,6 +76,7 @@ it will be associated to the project for subsequente use.
   - Optionally check out a branch after creation.
   - Check out, delete, or force-delete branches.
   - View branch history and branch changes diff.
+  - View commits on a branch that are not on the current checkout.
   - Copy the latest commit hash.
   - Rebase a branch onto another branch when supported by the backend.
 * Manage tags from a searchable tags list.

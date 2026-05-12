@@ -26,9 +26,10 @@ local scm
 ---@field private list widget.listbox
 ---@field private target string?
 ---@field private target_type "branch"|"tag"?
+---@field private range_base string?
 ---@field private current_commit string?
 ---@field private backend plugins.scm.backend?
----@overload fun(project_dir:string,path?:string,target?:string,target_type?:"branch"|"tag",backend?:plugins.scm.backend):plugins.scm.ui.HistoryResults
+---@overload fun(project_dir:string,path?:string,target?:string,target_type?:"branch"|"tag",backend?:plugins.scm.backend,range_base?:string):plugins.scm.ui.HistoryResults
 local HistoryResults = Widget:extend()
 
 ---@type core.contextmenu
@@ -40,7 +41,8 @@ HistoryResults.menu = ContextMenu()
 ---@param target? string
 ---@param target_type? "branch"|"tag"
 ---@param backend? plugins.scm.backend
-function HistoryResults:new(project_dir, path, target, target_type, backend)
+---@param range_base? string
+function HistoryResults:new(project_dir, path, target, target_type, backend, range_base)
   HistoryResults.super.new(self)
 
   -- close when automatically loaded from workspace plugin
@@ -65,6 +67,7 @@ function HistoryResults:new(project_dir, path, target, target_type, backend)
   self.is_file = false
   self.target = target
   self.target_type = target_type or (target and "branch" or nil)
+  self.range_base = range_base
   self.current_commit = nil
   self.backend = backend
 
@@ -80,6 +83,12 @@ function HistoryResults:new(project_dir, path, target, target_type, backend)
   local title_path = target and self.is_file
     and (self.path .. " on " .. target)
     or (target or self.path)
+  if self.range_base and target then
+    title_path = target .. " not on " .. self.range_base
+    if self.is_file then
+      title_path = self.path .. " on " .. title_path
+    end
+  end
   self.name = title_path .. " - Commits History"
   self.title = Label(self, "History for: " .. title_path)
   self.line = Line(self, 2, style.padding.x)
@@ -212,20 +221,32 @@ function HistoryResults:refresh()
     self.backend:get_current_commit(self.project_dir, function(commit)
       self.current_commit = commit
     end)
-    self.backend:get_commit_history(
-      self.is_file and self.abs_path or nil,
-      self.project_dir,
-      function(history)
-        if history and type(history) == "table" and #history > 0 then
-          self:populate(history, self.backend)
-        else
-          self:stop_searching()
-          core.warn("SCM: no commit history for '%s'.", self.path)
-        end
-      end,
-      self.target,
-      self.target_type
-    )
+    local callback = function(history)
+      if history and type(history) == "table" and #history > 0 then
+        self:populate(history, self.backend)
+      else
+        self:stop_searching()
+        core.warn("SCM: no commit history for '%s'.", self.path)
+      end
+    end
+    if self.range_base and self.target then
+      self.backend:get_commit_range_history(
+        self.is_file and self.abs_path or nil,
+        self.project_dir,
+        callback,
+        self.target,
+        self.range_base,
+        self.target_type
+      )
+    else
+      self.backend:get_commit_history(
+        self.is_file and self.abs_path or nil,
+        self.project_dir,
+        callback,
+        self.target,
+        self.target_type
+      )
+    end
   else
     core.warn("SCM: current project directory is not versioned.")
   end
@@ -262,6 +283,9 @@ function HistoryResults:update()
     if self.target then
       local name = self.target_type == "tag" and "Tag" or "Branch"
       target = name .. ": \"" .. self.target .. "\""
+      if self.range_base then
+        target = target .. ", Not On: \"" .. self.range_base .. "\""
+      end
       if self.is_file then
         target = target .. ", Path: \"" .. self.path .. "\""
       end

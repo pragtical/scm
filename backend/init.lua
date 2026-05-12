@@ -480,6 +480,16 @@ function Backend:get_changes(directory, callback) callback({}, false) end
 ---@diagnostic disable-next-line
 function Backend:get_commit_history(path, directory, callback, target, target_type) callback(nil) end
 
+---Retrieve commit history reachable from target but not from base.
+---@param path? string If not nil get commit history of specific file or directory.
+---@param directory string Project directory
+---@param callback plugins.scm.backend.ongetcommithistory
+---@param target string Branch, tag, commit or revision to include.
+---@param base? string Branch, tag, commit or revision to exclude.
+---@param target_type? "branch"|"tag"
+---@diagnostic disable-next-line
+function Backend:get_commit_range_history(path, directory, callback, target, base, target_type) callback(nil) end
+
 ---Retrieve the entire project unified diff.
 ---@param id string Hash of the commit
 ---@param directory string Project directory

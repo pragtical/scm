@@ -630,6 +630,56 @@ function Fossil:get_commit_history(path, directory, callback, target, target_typ
   end, directory, table.unpack(params))
 end
 
+---@param path? string
+---@param directory string
+---@param callback plugins.scm.backend.ongetcommithistory
+---@param target string Branch, tag, commit or revision to include
+---@param base? string Branch, tag, commit or revision to exclude
+---@param target_type? "branch"|"tag"
+function Fossil:get_commit_range_history(path, directory, callback, target, base, target_type)
+  self:get_commit_history(path, directory, function(history)
+    if not history or type(history) ~= "table" then
+      callback(history)
+      return
+    end
+    local params = {
+      "timeline", "ancestors", base or "current", "-n", "0", "-F", "%H"
+    }
+    self:execute(function(proc)
+      if not proc then
+        callback(nil)
+        return
+      end
+      local excluded = {}
+      for idx, line in self:get_process_lines(proc, "stdout") do
+        local hash = line:match("^%s*(%S+)%s*$")
+        if hash and hash ~= "" then
+          excluded[hash] = true
+        end
+        if idx % 100 == 0 then
+          self:yield()
+        end
+      end
+      if proc:returncode() ~= 0 then
+        callback(nil)
+        return
+      end
+
+      ---@type plugins.scm.backend.commit[]
+      local filtered = {}
+      for idx, commit in ipairs(history) do
+        if commit.hash and not excluded[commit.hash] then
+          table.insert(filtered, commit)
+        end
+        if idx % 100 == 0 then
+          self:yield()
+        end
+      end
+      callback(filtered)
+    end, directory, table.unpack(params))
+  end, target, target_type)
+end
+
 ---@param id string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommit

@@ -325,6 +325,14 @@ command.add(
     end
   end,
 
+  ["scm-branches:view-range-history"] = function(bl)
+    ---@cast bl plugins.scm.ui.BranchesList
+    local data = bl:get_selected_data()
+    if data then
+      scm.open_commit_range_history(bl.project_dir, data.name, nil, "branch")
+    end
+  end,
+
   ["scm-branches:view-diff"] = function(bl)
     ---@cast bl plugins.scm.ui.BranchesList
     local data = bl:get_selected_data()
@@ -393,6 +401,7 @@ BranchesList.menu:register(
   end, {
     { text = "View Changes Diff", command = "scm-branches:view-diff" },
     { text = "View Branch History", command = "scm-branches:view-history" },
+    { text = "View Commits Not On Current Branch", command = "scm-branches:view-range-history" },
     { text = "Copy Commit Hash", command = "scm-branches:copy-commit-hash" },
     { text = "Checkout Branch", command = "scm-branches:checkout" },
     ContextMenu.DIVIDER

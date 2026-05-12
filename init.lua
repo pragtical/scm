@@ -630,6 +630,36 @@ function scm.open_commit_history(path, target, target_type)
   end
 end
 
+---@param path? string
+---@param target string
+---@param base? string
+---@param target_type? "branch"|"tag"
+function scm.open_commit_range_history(path, target, base, target_type)
+  local project_dir = util.get_project_dir(path)
+  if not project_dir and PROJECTS[path] then
+    project_dir = path
+    path = nil
+  elseif not project_dir then
+    return
+  end
+  local backend = PROJECTS[project_dir]
+  if backend then
+    base = base or (backend.name == "Fossil" and "current" or "HEAD")
+    backend:get_commit_range_history(path, project_dir, function(history)
+      if history and type(history) == "table" and #history > 0 then
+        local HistoryResults = require "plugins.scm.ui.historyresults"
+        local results = HistoryResults(project_dir, path, target, target_type, backend, base)
+        core.root_view:get_active_node_default():add_view(results)
+        results:populate(history, backend)
+      else
+        core.warn("SCM: no commits for '%s' outside '%s'.", target, base)
+      end
+    end, target, base, target_type)
+  else
+    core.warn("SCM: current project directory is not versioned.")
+  end
+end
+
 ---@param project_dir? string
 function scm.open_branches_list(project_dir)
   project_dir = project_dir or util.get_current_project()

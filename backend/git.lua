@@ -668,6 +668,46 @@ function Git:get_commit_history(path, directory, callback, target, target_type)
   end, directory, table.unpack(params))
 end
 
+---@param path? string
+---@param directory string
+---@param callback plugins.scm.backend.ongetcommithistory
+---@param target string Branch, tag, commit or revision to include
+---@param base? string Branch, tag, commit or revision to exclude
+---@param target_type? "branch"|"tag"
+function Git:get_commit_range_history(path, directory, callback, target, base, target_type)
+  directory = git_repo_dir(directory, path)
+  local params = {
+    "log", "--oneline", "--no-decorate",
+    "--pretty=format:'%an' %H %ct %s",
+    target,
+    "--not",
+    base or "HEAD"
+  }
+  if path then
+    table.insert(params, "--")
+    table.insert(params, common.relative_path(directory, path))
+  end
+  self:execute(function(proc)
+    ---@type plugins.scm.backend.commit[]
+    local history = {}
+    for idx, line in self:get_process_lines(proc, "stdout") do
+      local author, hash, date, summary = line:match("('.-') (%S+) (%S+) (.*)")
+      if author then
+        table.insert(history, {
+          author = author:match("'(.*)'"),
+          hash = hash,
+          date = os.date("%Y-%m-%d %I:%M %p", tonumber(date)),
+          summary = summary
+        })
+      end
+      if idx % 100 == 0 then
+        self:yield()
+      end
+    end
+    callback(history)
+  end, directory, table.unpack(params))
+end
+
 ---@param id string
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommit
