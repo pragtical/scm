@@ -3,6 +3,7 @@
 
 local common = require "core.common"
 local Backend = require "plugins.scm.backend"
+local changes = require "plugins.scm.changes"
 
 ---Get top level git directory of path in order to support submodules.
 ---@param directory string
@@ -772,21 +773,9 @@ end
 function Git:get_stats(directory, callback)
   directory = git_repo_dir(directory)
   self:execute(function(proc)
-    local inserts = 0
-    local deletes = 0
-    for idx, line in self:get_process_lines(proc, "stdout") do
-      if line ~= "" then
-        local i, d = line:match("%s*(%d+)%s+(%d+)")
-        inserts = inserts + (tonumber(i) or 0)
-        deletes = deletes + (tonumber(d) or 0)
-      end
-      if idx % 50 == 0 then
-        self:yield()
-      end
-    end
-    local stats = {inserts = inserts, deletes = deletes}
-    callback(stats)
-  end, directory, "--no-optional-locks", "diff", "--numstat")
+    local diff = self:get_process_output(proc, "stdout")
+    callback(changes.stats(diff, function() self:yield() end))
+  end, directory, "--no-optional-locks", "diff", "-U0")
 end
 
 ---@param directory string Project directory

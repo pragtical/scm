@@ -1776,15 +1776,22 @@ local scm_status_item = core.status_view:add_item({
       return {}
     end
 
-    local bcolor = (STATS[project].inserts ~= 0 or STATS[project].deletes ~= 0)
+    local bcolor = (
+      STATS[project].inserts ~= 0
+      or STATS[project].deletes ~= 0
+      or STATS[project].modified ~= 0
+    )
       and style.accent or style.text
-    local icolor = STATS[project].inserts ~= 0 and style.accent or style.text
-    local dcolor = STATS[project].deletes ~= 0 and style.accent or style.text
+    local icolor = STATS[project].inserts ~= 0 and style.diff_insert or style.text
+    local mcolor = STATS[project].modified ~= 0 and style.diff_modify or style.text
+    local dcolor = STATS[project].deletes ~= 0 and style.diff_delete or style.text
 
     return {
       bcolor, BRANCHES[project],
       style.dim, "  ",
       icolor, "+", STATS[project].inserts,
+      style.dim, " / ",
+      mcolor, "~", STATS[project].modified,
       style.dim, " / ",
       dcolor, "-", STATS[project].deletes,
     }

@@ -20,6 +20,7 @@ local Object = require "core.object"
 ---@class plugins.scm.backend.stats
 ---@field inserts integer
 ---@field deletes integer
+---@field modified integer
 
 ---@class plugins.scm.backend.branch
 ---@field name string
@@ -527,7 +528,7 @@ function Backend:get_file_blame(file, directory, callback) callback(nil) end
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.ongetstats
 ---@diagnostic disable-next-line
-function Backend:get_stats(directory, callback) callback({0, 0}) end
+function Backend:get_stats(directory, callback) callback({inserts = 0, deletes = 0, modified = 0}) end
 
 ---Retrieve the status description for an entire repo.
 ---@param directory string Project directory

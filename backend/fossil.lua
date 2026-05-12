@@ -3,6 +3,7 @@
 
 local common = require "core.common"
 local Backend = require "plugins.scm.backend"
+local changes = require "plugins.scm.changes"
 
 ---@class plugins.scm.backend.fossil : plugins.scm.backend
 ---@field super plugins.scm.backend
@@ -725,23 +726,9 @@ end
 ---@param callback plugins.scm.backend.ongetstats
 function Fossil:get_stats(directory, callback)
   self:execute(function(proc)
-    local inserts = 0
-    local deletes = 0
-    local last_line = ""
-    for idx, line in self:get_process_lines(proc, "stdout") do
-      if line ~= "" then
-        last_line = line
-      end
-      if idx % 50 == 0 then
-        self:yield()
-      end
-    end
-    local i, d = last_line:match("%s*(%d+)%s+(%d+)")
-    inserts = tonumber(i) or 0
-    deletes = tonumber(d) or 0
-    local stats = {inserts = inserts, deletes = deletes}
-    callback(stats)
-  end, directory, "diff", "--numstat")
+    local diff = self:get_process_output(proc, "stdout")
+    callback(changes.stats(diff, function() self:yield() end))
+  end, directory, "diff", "-U", "0")
 end
 
 ---@param directory string Project directory
