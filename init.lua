@@ -183,19 +183,39 @@ local function update_doc_diff(doc)
       local backend = PROJECTS[project_dir]
       backend:get_file_diff(doc.abs_filename, project_dir, function(diff)
         if diff and diff ~= "" then
-          local parsed_diff = changes.parse(diff)
-          doc.scm_diff = nil
-          for _, _ in pairs(parsed_diff) do
-            doc.scm_diff = parsed_diff
-            break
-          end
+          doc.scm_diff_parse_key = doc.scm_diff_parse_key or {}
+          doc.scm_diff_parse_generation = (doc.scm_diff_parse_generation or 0) + 1
+          local key = doc.scm_diff_parse_key
+          local generation = doc.scm_diff_parse_generation
+          core.threads[key] = nil
+          core.add_thread(function()
+            local parsed_diff = changes.parse(diff, function()
+              coroutine.yield()
+            end)
+            if doc.scm_diff_parse_generation ~= generation then
+              return
+            end
+            doc.scm_diff = nil
+            for _, _ in pairs(parsed_diff) do
+              doc.scm_diff = parsed_diff
+              break
+            end
+          end, key)
         else
+          if doc.scm_diff_parse_key then
+            core.threads[doc.scm_diff_parse_key] = nil
+          end
+          doc.scm_diff_parse_generation = (doc.scm_diff_parse_generation or 0) + 1
           doc.scm_diff = nil
         end
       end)
       return
     end
   end
+  if doc.scm_diff_parse_key then
+    core.threads[doc.scm_diff_parse_key] = nil
+  end
+  doc.scm_diff_parse_generation = (doc.scm_diff_parse_generation or 0) + 1
   doc.scm_diff = nil
 end
 
