@@ -174,6 +174,7 @@ function HistoryResults:add_commit(commit)
   }
 
   self.list:add_row(row, commit)
+  core.redraw = true
 end
 
 function HistoryResults:stop_searching()

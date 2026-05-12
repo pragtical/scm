@@ -149,6 +149,7 @@ function BranchesList:add_branch(branch)
   }
 
   self.list:add_row(row, branch)
+  core.redraw = true
 end
 
 function BranchesList:clear_branches()

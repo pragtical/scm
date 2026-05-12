@@ -139,6 +139,7 @@ function TagsList:add_tag(tag)
     ListBox.COLEND,
     style.text, message
   }, tag)
+  core.redraw = true
 end
 
 function TagsList:clear_tags()
