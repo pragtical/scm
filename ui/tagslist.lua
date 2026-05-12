@@ -84,8 +84,6 @@ function TagsList:new(project_dir, backend)
     list_on_mouse_pressed(this, button, x, y, clicks)
     if button == "left" and clicks > 1 then
       command.perform "scm-tags:checkout"
-    elseif button == "right" and this.hovered_row > 0 then
-      this:set_selected(this.hovered_row)
     end
   end
 

@@ -105,8 +105,6 @@ function HistoryResults:new(project_dir, path, target, target_type, backend)
       if idx then
         self:on_selected(idx, this:get_row_data(idx))
       end
-    elseif button == "right" and this.hovered_row > 0 then
-      this:set_selected(this.hovered_row)
     end
   end
 
