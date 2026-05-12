@@ -56,9 +56,12 @@ it will be associated to the project for subsequente use.
 
 There is still missing functionality, but some of the following comes to mind:
 
-- [ ] Pull and push
-- [ ] be able to commit current changes
+- [ ] Push with credentials input
+- [ ] Be able to commit current changes
 - [ ] maybe colorize tabs text depending on the file status
+- [x] Pull with support for credentials input
+- [x] basic management of branches (list, create, delete, etc...)
+- [x] basic management of tags (list, create, delete, etc...)
 - [x] detecting if the SCM binaries are missing
 - [x] maybe... allow configuring the SCM binaries path
 - [x] restoring a file to a previous state
