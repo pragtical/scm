@@ -576,6 +576,14 @@ function Backend:amend_commit(directory, commit, message, callback) callback(fal
 ---@diagnostic disable-next-line
 function Backend:pull(directory, callback, username, password, strategy) callback(false, "not implemented") end
 
+---Push local changes to the configured remote.
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param username? string
+---@param password? string
+---@diagnostic disable-next-line
+function Backend:push(directory, callback, username, password) callback(false, "not implemented") end
+
 ---Fetch remote references without updating the current checkout.
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus

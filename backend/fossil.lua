@@ -97,6 +97,7 @@ end
 ---@return string?
 function Fossil:get_url_username(url)
   url = url:match("^%s*(.-)%s*$")
+  url = url:match("([%w][%w%+%-%.]*://%S+)") or url
   local rest = url:match("^[%w][%w%+%-%.]*://(.+)$")
   if not rest then
     return nil
@@ -139,11 +140,15 @@ end
 ---@param callback fun(username?:string)
 function Fossil:get_username(directory, callback)
   self:execute(function(proc)
-    if proc:returncode() ~= 0 then
+    if not proc then
       callback(nil)
       return
     end
     local stdout = self:get_process_output(proc, "stdout")
+    if proc:returncode() ~= 0 then
+      callback(nil)
+      return
+    end
     callback(self:get_url_username(stdout))
   end, directory, "remote")
 end
@@ -803,6 +808,28 @@ function Fossil:pull(directory, callback, username, password, strategy)
   self:execute(function(proc)
     self:handle_exec_status(proc, callback)
   end, directory, "pull")
+end
+
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param username? string
+---@param password? string
+function Fossil:push(directory, callback, username, password)
+  if self:has_credentials(username, password) then
+    self:get_authenticated_remote_url(directory, username, password, function(url, errmsg)
+      if not url then
+        callback(false, errmsg or "Could not determine Fossil remote URL.")
+        return
+      end
+      self:execute(function(proc)
+        self:handle_exec_status(proc, callback)
+      end, directory, "push", url, "--once")
+    end)
+    return
+  end
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, directory, "push")
 end
 
 ---@param directory string Project directory

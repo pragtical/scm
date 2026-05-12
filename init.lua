@@ -172,6 +172,10 @@ setmetatable(PROJECTS, {
   end
 })
 
+---Last username entered in the credentials dialog by backend/project.
+---@type table<string,string>
+local CREDENTIAL_USERNAMES = {}
+
 --------------------------------------------------------------------------------
 -- Helper functions
 --------------------------------------------------------------------------------
@@ -825,9 +829,14 @@ end
 ---@param on_cancel? fun()
 local function request_credentials(project_dir, backend, on_submit, on_cancel)
   local function show_dialog(username)
+    local key = backend.name .. "\n" .. project_dir
+    username = username or CREDENTIAL_USERNAMES[key]
     local CredentialsDialog = require "plugins.scm.ui.credentialsdialog"
     local dialog = CredentialsDialog(project_dir, username)
     function dialog:on_submit(user, password)
+      if user and user ~= "" then
+        CREDENTIAL_USERNAMES[key] = user
+      end
       on_submit(user, password)
     end
     function dialog:on_cancel()
@@ -912,6 +921,45 @@ function scm.pull(project_dir)
       end, username, password, strategy)
     end
     pull()
+  end
+end
+
+---@param project_dir? string
+---@param callback? fun(success:boolean, errmsg:string?)
+function scm.push(project_dir, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if backend then
+    local function push(username, password, retried_with_credentials)
+      backend:push(project_dir, function(success, errmsg, requires_credentials)
+        if success then
+          core.log("SCM: pushed latest changes for '%s'", project_dir)
+        elseif not retried_with_credentials and (
+          requires_credentials or backend:requires_credentials(errmsg)
+        ) then
+          request_credentials(project_dir, backend, function(user, pass)
+            push(user, pass, true)
+          end, function()
+            if callback then callback(false, "credentials not provided") end
+          end)
+          return
+        else
+          MessageBox.error(
+            "SCM Push Failed",
+            {
+              "Project: " .. project_dir .. "\n",
+              "",
+              errmsg or "Unknown error"
+            }
+          )
+        end
+        if callback then callback(success, errmsg) end
+      end, username, password)
+    end
+    push()
+  else
+    core.warn("SCM: current project directory is not versioned.")
+    if callback then callback(false) end
   end
 end
 
@@ -1944,6 +1992,10 @@ command.add(
 
   ["scm:project-status"] = function(project_dir)
     scm.open_project_status(project_dir)
+  end,
+
+  ["scm:push"] = function(project_dir)
+    scm.push(project_dir)
   end,
 
   ["scm:new-commit"] = function(project_dir)

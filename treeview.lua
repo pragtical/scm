@@ -48,6 +48,7 @@ TreeViewMenu:register(
   {
     TreeViewMenu.DIVIDER,
     { text = "Pull From Remote", command = "treeview:scm-pull" },
+    { text = "Push To Remote", command = "treeview:scm-push" },
     { text = "View Changes Diff", command = "treeview:scm-global-diff" },
     { text = "View Project Status", command = "treeview:scm-project-status" },
     { text = "View Branches", command = "treeview:scm-view-branches" },
@@ -82,6 +83,10 @@ command.add(
 
   ["treeview:scm-pull"] = function()
     scm.pull(TreeView.hovered_item.abs_filename)
+  end,
+
+  ["treeview:scm-push"] = function()
+    scm.push(TreeView.hovered_item.abs_filename)
   end,
 
   ["treeview:scm-global-diff"] = function()

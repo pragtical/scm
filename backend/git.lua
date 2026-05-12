@@ -906,6 +906,17 @@ function Git:pull(directory, callback, username, password, strategy)
   end, directory, table.unpack(params))
 end
 
+---@param directory string Project directory
+---@param callback plugins.scm.backend.onexecstatus
+---@param username? string Ignored by Git
+---@param password? string Ignored by Git
+function Git:push(directory, callback, username, password)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, directory, "--no-optional-locks", "push")
+end
+
 ---@param errmsg? string
 ---@return boolean
 function Git:requires_pull_strategy(errmsg)
