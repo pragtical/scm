@@ -438,6 +438,38 @@ function Git:checkout(target, directory, callback)
   end, directory, "checkout", target)
 end
 
+---@param commit string Commit hash or revision to cherry-pick
+---@param directory string Project directory
+---@param callback plugins.scm.backend.oncherrypickstatus
+function Git:cherry_pick(commit, directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    if not proc then
+      callback(false, "Could not start Git process.", false)
+      return
+    end
+    local success = false
+    local errmsg = ""
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if proc:returncode() == 0 then
+      success = true
+    else
+      if stderr ~= "" then
+        errmsg = stderr
+      elseif stdout ~= "" then
+        errmsg = stdout
+      end
+    end
+    callback(success, errmsg, self:requires_cherry_pick_resolution(errmsg))
+  end, directory, "--no-optional-locks", "cherry-pick", commit)
+end
+
+---@return boolean
+function Git:supports_cherry_pick()
+  return true
+end
+
 ---@param branch string Branch to delete
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
@@ -610,10 +642,6 @@ function Git:get_commit_history(path, directory, callback, target, target_type)
   }
   if target then
     table.insert(params, target)
-    if target_type ~= "tag" then
-      table.insert(params, "--not")
-      table.insert(params, "HEAD")
-    end
   end
   if path then
     table.insert(params, "--")
@@ -951,6 +979,16 @@ function Git:requires_rebase_resolution(errmsg)
       or errmsg:find("resolve all conflicts", 1, true) ~= nil
       or errmsg:find("could not apply", 1, true) ~= nil
     )
+end
+
+---@param errmsg? string
+---@return boolean
+function Git:requires_cherry_pick_resolution(errmsg)
+  errmsg = (errmsg or ""):lower()
+  return errmsg:find("cherry-pick --continue", 1, true) ~= nil
+    or errmsg:find("resolve all conflicts", 1, true) ~= nil
+    or errmsg:find("could not apply", 1, true) ~= nil
+    or errmsg:find("after resolving the conflicts", 1, true) ~= nil
 end
 
 ---@param proc process

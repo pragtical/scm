@@ -74,6 +74,7 @@ local Object = require "core.object"
 ---@alias plugins.scm.backend.onexecstatus fun(success:boolean, errmsg?:string, requires_credentials?:boolean, requires_pull_strategy?:boolean)
 ---@alias plugins.scm.backend.rebasestrategy "normal"|"ours"|"theirs"
 ---@alias plugins.scm.backend.onrebasestatus fun(success:boolean, errmsg?:string, requires_rebase_resolution?:boolean)
+---@alias plugins.scm.backend.oncherrypickstatus fun(success:boolean, errmsg?:string, requires_resolution?:boolean)
 
 ---Base functionality to implement a SCM backend with async support.
 ---@class plugins.scm.backend : core.object
@@ -437,6 +438,17 @@ function Backend:update_tag(tag, old_commit, target, directory, callback, annota
 ---@diagnostic disable-next-line
 function Backend:checkout(target, directory, callback) callback(false, "not implemented") end
 
+---Cherry-pick the given commit into the current checkout.
+---@param commit string Commit hash or backend-supported revision
+---@param directory string Project directory
+---@param callback plugins.scm.backend.oncherrypickstatus
+---@diagnostic disable-next-line
+function Backend:cherry_pick(commit, directory, callback) callback(false, "not implemented", false) end
+
+---Report if cherry-picking commits is supported.
+---@return boolean
+function Backend:supports_cherry_pick() return false end
+
 ---Delete the given branch.
 ---@param branch string Branch to delete
 ---@param directory string Project directory
@@ -617,6 +629,11 @@ function Backend:requires_pull_strategy(errmsg) return false end
 ---@param errmsg? string
 ---@return boolean
 function Backend:requires_rebase_resolution(errmsg) return false end
+
+---Report if a backend error means a cherry-pick stopped for manual resolution.
+---@param errmsg? string
+---@return boolean
+function Backend:requires_cherry_pick_resolution(errmsg) return false end
 
 ---Set the backend's default pull strategy for this repository.
 ---@param directory string Project directory

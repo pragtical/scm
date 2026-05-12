@@ -368,6 +368,11 @@ command.add(
     refresh_from_remote(bl)
   end,
 
+  ["scm-branches:refresh"] = function(bl)
+    ---@cast bl plugins.scm.ui.BranchesList
+    bl:refresh()
+  end,
+
   ["scm-branches:delete"] = function(bl)
     ---@cast bl plugins.scm.ui.BranchesList
     confirm_delete_branch(bl, false)
@@ -410,6 +415,7 @@ BranchesList.menu:register(
     return core.active_view:is(BranchesList)
       and not core.active_view.searching
   end, {
+    { text = "Refresh", command = "scm-branches:refresh" },
     { text = "Refresh From Remote", command = "scm-branches:refresh-from-remote" },
     { text = "Create Branch", command = "scm-branches:create" }
 })

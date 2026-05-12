@@ -26,6 +26,15 @@ function Fossil:requires_credentials(errmsg)
     or errmsg:find("401", 1, true) ~= nil
 end
 
+---@param errmsg? string
+---@return boolean
+function Fossil:requires_cherry_pick_resolution(errmsg)
+  errmsg = (errmsg or ""):lower()
+  return errmsg:find("conflict", 1, true) ~= nil
+    or errmsg:find("unresolved", 1, true) ~= nil
+    or errmsg:find("merge", 1, true) ~= nil
+end
+
 ---@param proc process
 ---@param callback plugins.scm.backend.onexecstatus
 function Fossil:handle_exec_status(proc, callback)
@@ -432,6 +441,61 @@ function Fossil:checkout(target, directory, callback)
     end
     callback(success, errmsg)
   end, directory, "update", target)
+end
+
+---@param commit string Commit hash or revision to cherry-pick
+---@param directory string Project directory
+---@param callback plugins.scm.backend.oncherrypickstatus
+function Fossil:cherry_pick(commit, directory, callback)
+  self:get_commit_info(commit, directory, function(info)
+    local message = info and (info.message or info.summary)
+      or ("Cherry-picked commit " .. commit)
+    message = (message and message ~= "" and message or ("Cherry-picked commit " .. commit))
+      .. "\n\nCherry-picked-from: " .. commit
+
+    self:execute(function(proc)
+      if not proc then
+        callback(false, "Could not start Fossil process.", false)
+        return
+      end
+      local stdout = self:get_process_output(proc, "stdout")
+      local stderr = self:get_process_output(proc, "stderr")
+      if proc:returncode() ~= 0 then
+        local errmsg = stderr ~= "" and stderr or stdout
+        callback(false, errmsg, self:requires_cherry_pick_resolution(errmsg))
+        return
+      end
+
+      self:with_commit_message_file(message, function(filename, cleanup, errmsg)
+        if not filename then
+          callback(false, errmsg or "Could not create temporary commit message file.", false)
+          return
+        end
+        local started = self:execute(function(commit_proc)
+          if not commit_proc then
+            callback(false, "Could not start Fossil process.", false)
+            if cleanup then cleanup() end
+            return
+          end
+          local commit_stdout = self:get_process_output(commit_proc, "stdout")
+          local commit_stderr = self:get_process_output(commit_proc, "stderr")
+          if commit_proc:returncode() == 0 then
+            callback(true, "", false)
+          else
+            local commit_errmsg = commit_stderr ~= "" and commit_stderr or commit_stdout
+            callback(false, commit_errmsg, self:requires_cherry_pick_resolution(commit_errmsg))
+          end
+          if cleanup then cleanup() end
+        end, directory, "commit", "-M", filename)
+        if not started and cleanup then cleanup() end
+      end)
+    end, directory, "cherrypick", commit)
+  end)
+end
+
+---@return boolean
+function Fossil:supports_cherry_pick()
+  return true
 end
 
 ---@param branch string Branch to close

@@ -1266,6 +1266,80 @@ function scm.checkout(target, project_dir)
   end
 end
 
+---@param commit string Commit hash or revision to cherry-pick
+---@param project_dir? string
+---@param callback? fun(success:boolean, errmsg:string?)
+function scm.cherry_pick(commit, project_dir, callback)
+  project_dir = project_dir or util.get_current_project()
+  local backend = PROJECTS[project_dir]
+  if not backend then
+    local errmsg = "Current project directory is not versioned."
+    core.warn("SCM: %s", errmsg)
+    if callback then callback(false, errmsg) end
+    return
+  end
+  if not backend:supports_cherry_pick() then
+    local errmsg = "This backend does not support cherry-picking commits."
+    MessageBox.error("SCM Cherry Pick", errmsg)
+    if callback then callback(false, errmsg) end
+    return
+  end
+
+  MessageBox.warning(
+    "SCM Cherry Pick",
+    {
+      "Do you really want to cherry-pick this commit?",
+      Widget.NEWLINE,
+      Widget.NEWLINE,
+      "Commit: " .. commit,
+      Widget.NEWLINE,
+      "Project: " .. project_dir
+    },
+    function(_, button_id)
+      if button_id ~= 1 then
+        if callback then callback(false, "Cherry-pick cancelled.") end
+        return
+      end
+
+      backend:cherry_pick(commit, project_dir, function(success, errmsg, requires_resolution)
+        if success then
+          core.log("SCM: cherry-picked commit '%s' in '%s'", commit, project_dir)
+          scm.update()
+        elseif requires_resolution or backend:requires_cherry_pick_resolution(errmsg) then
+          MessageBox.error(
+            "SCM Cherry Pick Stopped",
+            {
+              "The cherry-pick stopped because conflicts need manual resolution.",
+              Widget.NEWLINE,
+              Widget.NEWLINE,
+              "Commit: " .. commit,
+              Widget.NEWLINE,
+              "Project: " .. project_dir,
+              Widget.NEWLINE,
+              Widget.NEWLINE,
+              errmsg or "Resolve conflicts, then continue or abort the cherry-pick with your SCM."
+            }
+          )
+        else
+          MessageBox.error(
+            "SCM Cherry Pick Failed",
+            {
+              "Commit: " .. commit,
+              Widget.NEWLINE,
+              "Project: " .. project_dir,
+              Widget.NEWLINE,
+              Widget.NEWLINE,
+              errmsg or "Unknown error"
+            }
+          )
+        end
+        if callback then callback(success, errmsg) end
+      end)
+    end,
+    MessageBox.BUTTONS_YES_NO
+  )
+end
+
 ---@param branch string Branch to delete
 ---@param project_dir? string
 ---@param force? boolean Force deletion when supported by the backend

@@ -53,6 +53,8 @@ it will be associated to the project for subsequente use.
   specific file or directory path, or for a selected branch or tag.
   - View the diff of any commit on the list.
   - Copy the commit hash.
+  - Cherry-pick a commit into the current checkout when supported by the
+    backend.
   - If a file compare the commit with current file.
   - Amend the current commit from the latest history entry.
 * Create commits with a dedicated commit-message editor.

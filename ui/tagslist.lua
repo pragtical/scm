@@ -364,6 +364,11 @@ command.add(
     refresh_from_remote(tl)
   end,
 
+  ["scm-tags:refresh"] = function(tl)
+    ---@cast tl plugins.scm.ui.TagsList
+    tl:refresh()
+  end,
+
   ["scm-tags:edit"] = function(tl)
     ---@cast tl plugins.scm.ui.TagsList
     confirm_edit_tag(tl)
@@ -393,6 +398,7 @@ TagsList.menu:register(
     return core.active_view:is(TagsList)
       and not core.active_view.searching
   end, {
+    { text = "Refresh", command = "scm-tags:refresh" },
     { text = "Refresh From Remote", command = "scm-tags:refresh-from-remote" },
     { text = "Create Tag", command = "scm-tags:create" }
 })

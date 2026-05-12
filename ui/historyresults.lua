@@ -27,6 +27,7 @@ local scm
 ---@field private target string?
 ---@field private target_type "branch"|"tag"?
 ---@field private current_commit string?
+---@field private backend plugins.scm.backend?
 ---@overload fun(project_dir:string,path?:string,target?:string,target_type?:"branch"|"tag",backend?:plugins.scm.backend):plugins.scm.ui.HistoryResults
 local HistoryResults = Widget:extend()
 
@@ -65,6 +66,7 @@ function HistoryResults:new(project_dir, path, target, target_type, backend)
   self.target = target
   self.target_type = target_type or (target and "branch" or nil)
   self.current_commit = nil
+  self.backend = backend
 
   self.searching = true
   if path then
@@ -177,6 +179,58 @@ function HistoryResults:add_commit(commit)
   core.redraw = true
 end
 
+function HistoryResults:clear_commits()
+  self.searching = true
+  self.list:filter(nil)
+  self.list:clear()
+  self.list.rows_original = {}
+  self.list.row_data_original = {}
+  self.list.rows_idx_original = {}
+  self.list:resize_to_parent()
+end
+
+---@param history plugins.scm.backend.commit[]
+---@param backend plugins.scm.backend
+function HistoryResults:populate(history, backend)
+  for idx, commit in ipairs(history) do
+    self:add_commit(commit)
+    if idx % 100 == 0 then
+      core.redraw = true
+      self.list:resize_to_parent()
+      backend:yield()
+    end
+  end
+  core.redraw = true
+  self.list:resize_to_parent()
+  self:stop_searching()
+end
+
+function HistoryResults:refresh()
+  if self.backend then
+    self:clear_commits()
+    self.current_commit = nil
+    self.backend:get_current_commit(self.project_dir, function(commit)
+      self.current_commit = commit
+    end)
+    self.backend:get_commit_history(
+      self.is_file and self.abs_path or nil,
+      self.project_dir,
+      function(history)
+        if history and type(history) == "table" and #history > 0 then
+          self:populate(history, self.backend)
+        else
+          self:stop_searching()
+          core.warn("SCM: no commit history for '%s'.", self.path)
+        end
+      end,
+      self.target,
+      self.target_type
+    )
+  else
+    core.warn("SCM: current project directory is not versioned.")
+  end
+end
+
 function HistoryResults:stop_searching()
   self.searching = false
 end
@@ -252,6 +306,31 @@ command.add(
     if data then
       scm.open_commit_diff(data.hash, hr.project_dir)
     end
+  end,
+
+  ["scm-history:refresh"] = function(hr)
+    ---@cast hr plugins.scm.ui.HistoryResults
+    hr:refresh()
+  end
+})
+
+command.add(
+  function()
+    return core.active_view:is(HistoryResults)
+      and not core.active_view.searching
+      and core.active_view.backend
+      and core.active_view.backend:supports_cherry_pick()
+      and core.active_view.current_commit
+      and core.active_view:get_selected_data()
+      and not core.active_view:selected_is_current_commit(),
+      core.active_view
+  end, {
+  ["scm-history:cherry-pick"] = function(hr)
+    ---@cast hr plugins.scm.ui.HistoryResults
+    local data = hr:get_selected_data()
+    if data then
+      scm.cherry_pick(data.hash, hr.project_dir)
+    end
   end
 })
 
@@ -295,7 +374,22 @@ HistoryResults.menu:register(
   end, {
     { text = "View Diff", command = "scm-history:view-diff" },
     { text = "Amend Current Commit", command = "scm-history:amend-current-commit" },
-    { text = "Copy Commit Hash", command = "scm-history:copy-commit-hash" }
+    { text = "Copy Commit Hash", command = "scm-history:copy-commit-hash" },
+    ContextMenu.DIVIDER,
+    { text = "Refresh", command = "scm-history:refresh" }
+})
+
+HistoryResults.menu:register(
+  function()
+    return core.active_view:is(HistoryResults)
+      and not core.active_view.searching
+      and core.active_view.backend
+      and core.active_view.backend:supports_cherry_pick()
+      and core.active_view.current_commit
+      and core.active_view:get_selected_data()
+      and not core.active_view:selected_is_current_commit()
+  end, {
+    { text = "Cherry Pick Commit", command = "scm-history:cherry-pick" }
 })
 
 HistoryResults.menu:register(
