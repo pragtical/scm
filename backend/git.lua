@@ -118,7 +118,7 @@ function Git:stage_file(file, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -141,7 +141,7 @@ function Git:unstage_file(file, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -288,7 +288,7 @@ function Git:create_branch(branch, base_branch, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -324,7 +324,7 @@ function Git:rebase_branch(branch, base_branch, directory, callback, strategy)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -365,7 +365,7 @@ function Git:create_tag(tag, target, directory, callback, annotated, message)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -402,7 +402,7 @@ function Git:update_tag(tag, old_commit, target, directory, callback, annotated,
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -425,7 +425,7 @@ function Git:checkout(target, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -449,7 +449,7 @@ function Git:delete_branch(branch, directory, callback, force)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -473,7 +473,7 @@ function Git:delete_tag(tag, commit, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -893,7 +893,7 @@ function Git:pull(directory, callback, username, password, strategy)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -948,7 +948,7 @@ function Git:handle_exec_status(proc, callback)
   local errmsg = ""
   local stdout = self:get_process_output(proc, "stdout")
   local stderr = self:get_process_output(proc, "stderr")
-  if proc:returncode() == 0 then
+  if proc and proc:returncode() == 0 then
     success = true
   else
     if stderr ~= "" then
@@ -1003,7 +1003,7 @@ function Git:fetch(directory, callback, prune)
       local errmsg = ""
       local stdout = self:get_process_output(proc, "stdout")
       local stderr = self:get_process_output(proc, "stderr")
-      if proc:returncode() == 0 then
+      if proc and proc:returncode() == 0 then
         success = true
       else
         if stderr ~= "" then
@@ -1079,7 +1079,7 @@ function Git:revert_file(file, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -1102,7 +1102,7 @@ function Git:add_path(path, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -1125,7 +1125,7 @@ function Git:remove_path(path, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -1150,7 +1150,7 @@ function Git:move_path(from, to, directory, callback)
       local errmsg = ""
       local stdout = self:get_process_output(proc, "stdout")
       local stderr = self:get_process_output(proc, "stderr")
-      if proc:returncode() == 0 then
+      if proc and proc:returncode() == 0 then
         success = true
       else
         if stderr ~= "" then

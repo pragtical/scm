@@ -30,14 +30,14 @@ end
 ---@param callback plugins.scm.backend.onexecstatus
 function Fossil:handle_exec_status(proc, callback)
   if not proc then
-    callback(false, "Could not start Fossil process.")
+    callback(false, "Could not start Fossil process.", false)
     return
   end
   local success = false
   local errmsg = ""
   local stdout = self:get_process_output(proc, "stdout")
   local stderr = self:get_process_output(proc, "stderr")
-  if proc:returncode() == 0 then
+  if proc and proc:returncode() == 0 then
     success = true
   else
     if stderr ~= "" then
@@ -121,7 +121,7 @@ function Fossil:get_authenticated_remote_url(directory, username, password, call
   self:execute(function(proc)
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() ~= 0 then
+    if not proc or proc:returncode() ~= 0 then
       callback(nil, stderr ~= "" and stderr or stdout)
       return
     end
@@ -145,7 +145,7 @@ function Fossil:get_username(directory, callback)
       return
     end
     local stdout = self:get_process_output(proc, "stdout")
-    if proc:returncode() ~= 0 then
+    if not proc or proc:returncode() ~= 0 then
       callback(nil)
       return
     end
@@ -329,7 +329,7 @@ function Fossil:create_branch(branch, base_branch, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -358,7 +358,7 @@ function Fossil:create_tag(tag, target, directory, callback, annotated, message)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -382,7 +382,7 @@ function Fossil:update_tag(tag, old_commit, target, directory, callback, annotat
   self:execute(function(cancel_proc)
     local cancel_stdout = self:get_process_output(cancel_proc, "stdout")
     local cancel_stderr = self:get_process_output(cancel_proc, "stderr")
-    if cancel_proc:returncode() ~= 0 then
+    if not cancel_proc or cancel_proc:returncode() ~= 0 then
       local errmsg = cancel_stderr ~= "" and cancel_stderr or cancel_stdout
       callback(false, errmsg)
       return
@@ -397,7 +397,7 @@ function Fossil:update_tag(tag, old_commit, target, directory, callback, annotat
       local errmsg = ""
       local stdout = self:get_process_output(add_proc, "stdout")
       local stderr = self:get_process_output(add_proc, "stderr")
-      if add_proc:returncode() == 0 then
+      if add_proc and add_proc:returncode() == 0 then
         success = true
       else
         if stderr ~= "" then
@@ -421,7 +421,7 @@ function Fossil:checkout(target, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -444,7 +444,7 @@ function Fossil:delete_branch(branch, directory, callback, force)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -467,7 +467,7 @@ function Fossil:delete_tag(tag, commit, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -864,7 +864,7 @@ function Fossil:revert_file(file, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -886,7 +886,7 @@ function Fossil:add_path(path, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -908,7 +908,7 @@ function Fossil:remove_path(path, directory, callback)
     local errmsg = ""
     local stdout = self:get_process_output(proc, "stdout")
     local stderr = self:get_process_output(proc, "stderr")
-    if proc:returncode() == 0 then
+    if proc and proc:returncode() == 0 then
       success = true
     else
       if stderr ~= "" then
@@ -932,7 +932,7 @@ function Fossil:move_path(from, to, directory, callback)
       local errmsg = ""
       local stdout = self:get_process_output(proc, "stdout")
       local stderr = self:get_process_output(proc, "stderr")
-      if proc:returncode() == 0 then
+      if proc and proc:returncode() == 0 then
         success = true
       else
         if stderr ~= "" then
