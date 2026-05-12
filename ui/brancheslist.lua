@@ -110,6 +110,9 @@ function BranchesList:get_selected_data()
 end
 
 function BranchesList:on_mouse_pressed(button, x, y, clicks)
+  if BranchesList.menu.show_context_menu then
+    return BranchesList.menu:on_mouse_pressed(button, x, y, clicks)
+  end
   local processed = BranchesList.super.on_mouse_pressed(self, button, x, y, clicks)
   local handled = false
   if self.list:mouse_on_top(x, y) then

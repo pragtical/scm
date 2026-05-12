@@ -106,6 +106,9 @@ function TagsList:get_selected_data()
 end
 
 function TagsList:on_mouse_pressed(button, x, y, clicks)
+  if TagsList.menu.show_context_menu then
+    return TagsList.menu:on_mouse_pressed(button, x, y, clicks)
+  end
   local processed = TagsList.super.on_mouse_pressed(self, button, x, y, clicks)
   local handled = false
   if self.list:mouse_on_top(x, y) then

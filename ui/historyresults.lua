@@ -144,6 +144,9 @@ function HistoryResults:selected_is_current_commit()
 end
 
 function HistoryResults:on_mouse_pressed(button, x, y, clicks)
+  if HistoryResults.menu.show_context_menu then
+    return HistoryResults.menu:on_mouse_pressed(button, x, y, clicks)
+  end
   local processed = HistoryResults.super.on_mouse_pressed(self, button, x, y, clicks)
   local handled = false
   if self.list:mouse_on_top(x, y) then
