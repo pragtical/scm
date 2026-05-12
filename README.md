@@ -30,49 +30,63 @@ it will be associated to the project for subsequente use.
 
 ## Features
 
-* Support for multiple projects (not tested).
-* Show current branch and stats on status bar.
-* View the current project diff on a new doc view by executing the
-  `scm:global-diff` command or clicking on the status bar SCM item.
-* Colorize the treeview files depending on the item status which can be:
+* Support for multiple projects.
+* Detect missing SCM binaries and allow configuring Git and Fossil binary paths.
+* Show the current branch and change statistics on the status bar.
+  - Inserted, modified, and deleted line counts are colorized with diff colors.
+* View the current project diff in a read-only document by executing the
+  `scm:global-diff` command or clicking the status bar SCM item.
+* View the current project status by executing `scm:project-status`.
+* Colorize treeview files depending on the item status, which can be:
   - added
   - renamed
-  - deleted,
+  - deleted
   - edited
   - untracked
-* Draw file changes on the doc view which includes:
+* Draw file changes in document gutters, including:
   - additions
   - deletions
   - modifications
 * Display blame information for active document line.
   - View the diff changes for the associated commit.
-* View the commits history list for the entire project and also
-  for a specific file or directory path.
-  - View the diff of any commit on the list
-  - Copy the hash
+* View the searchable commit history list for the entire project, for a
+  specific file or directory path, or for a selected branch or tag.
+  - View the diff of any commit on the list.
+  - Copy the commit hash.
   - If a file compare the commit with current file.
-
-## TODO
-
-There is still missing functionality, but some of the following comes to mind:
-
-- [ ] maybe colorize tabs text depending on the file status
-- [x] Commit current changes
-- [x] Amend last commit
-- [x] Be able to commit current changes
-- [x] Push with credentials input
-- [x] Pull with support for credentials input
-- [x] basic management of branches (list, create, delete, etc...)
-- [x] basic management of tags (list, create, delete, etc...)
-- [x] detecting if the SCM binaries are missing
-- [x] maybe... allow configuring the SCM binaries path
-- [x] restoring a file to a previous state
-- [x] view the commit history of project or file
-- [x] view diff of a specific file: `scm:file-diff`
-- [x] add, rename and remove files in version control
-
-Suggestions for how to implement the above features are welcome as other ideas
-not listed above.
+  - Amend the current commit from the latest history entry.
+* Create commits with a dedicated commit-message editor.
+  - The editor shows repository status as comments that are stripped before
+    committing.
+  - The first line is highlighted when it exceeds the recommended length.
+  - Subsequent lines are wrapped to the recommended body length.
+* Amend the current commit with `scm:amend-current-commit`.
+* Pull changes with credentials input when the backend requires it.
+  - Git divergent-pull errors can prompt for merge, rebase, or fast-forward-only
+    strategy.
+  - The selected Git pull strategy can be remembered for the repository.
+* Push changes with credentials input when the backend requires it.
+* Fetch remote refs from branch and tag views.
+  - Backends that support pruning can ask whether locally cached deleted remote
+    refs should be pruned.
+* Manage branches from a searchable branches list.
+  - Create branches from a selected base branch.
+  - Optionally check out a branch after creation.
+  - Check out, delete, or force-delete branches.
+  - View branch history and branch changes diff.
+  - Copy the latest commit hash.
+  - Rebase a branch onto another branch when supported by the backend.
+* Manage tags from a searchable tags list.
+  - Create lightweight or annotated tags from a selected commit.
+  - Edit a tag target and applicable metadata.
+  - Check out or delete tags.
+  - View tag history and tag changes diff.
+  - Copy the tag commit hash.
+* Add, remove, move, restore, stage, and unstage paths when supported by the
+  backend.
+* View file diffs with `scm:file-diff` and compare files with HEAD.
+* Navigate between document changes with `scm:goto-previous-change` and
+  `scm:goto-next-change`.
 
 ## Credits
 
