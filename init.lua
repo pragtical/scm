@@ -1,4 +1,4 @@
--- mod-version:3.10
+-- mod-version:3.11
 --
 -- Source Control Management plugin.
 -- @copyright Jefferson Gonzalez <jgmdev@gmail.com>
@@ -1868,8 +1868,11 @@ if type(config.show_line_numbers) == "boolean" then
     end
 
     local yoffset = self:get_line_text_y_offset()
+    local visual_height = self.get_line_visual_height
+      and self:get_line_visual_height(line)
+      or self:get_line_height()
     if diff_type ~= "deletion" then
-      renderer.draw_rect(x, y + yoffset, DIFF_WIDTH * SCALE, self:get_line_height(), color)
+      renderer.draw_rect(x, y + yoffset, DIFF_WIDTH * SCALE, visual_height, color)
       return
     end
     if align == "right" then x = x - style.padding.x / 2 end
@@ -1923,8 +1926,11 @@ else
     end
 
     local yoffset = self:get_line_text_y_offset()
+    local visual_height = self.get_line_visual_height
+      and self:get_line_visual_height(line)
+      or self:get_line_height()
     if diff_type ~= "deletion" then
-      renderer.draw_rect(x, y + yoffset, DIFF_WIDTH, self:get_line_height(), color)
+      renderer.draw_rect(x, y + yoffset, DIFF_WIDTH, visual_height, color)
       return
     end
     renderer.draw_rect(x - DIFF_WIDTH * 2, y + yoffset, DIFF_WIDTH * 4, 2, color)
@@ -1980,11 +1986,11 @@ function DocView:draw()
       return
     end
 
-    local line = self.doc:get_selection()
+    local line, col = self.doc:get_selection()
     local info = self.doc.blame_list[line]
 
     if info then
-      local x, y = self:get_line_screen_position(line)
+      local x, y = self:get_line_screen_position(line, col)
       local backend = scm.get_path_backend(self.doc.abs_filename)
       if backend then
         local text
