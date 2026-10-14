@@ -19,7 +19,9 @@ local function git_toplevel_path(directory)
       directory = top_path
       break
     end
-    top_path = common.dirname(top_path)
+    local parent = common.dirname(top_path)
+    if not parent or parent == top_path then break end
+    top_path = parent
   until not top_path
   return common.normalize_path(directory:gsub("%s+$", ""))
 end
@@ -33,7 +35,9 @@ local function git_repo_dir(directory, file)
   local path = file
   local path_info = system.get_file_info(path)
   while not path_info or path_info.type == "file" do
-    path = common.dirname(path)
+    local parent = common.dirname(path)
+    if not parent or parent == path then return git_toplevel_path(directory) end
+    path = parent
     path_info = system.get_file_info(path)
   end
   -- if path same as base directory return it
