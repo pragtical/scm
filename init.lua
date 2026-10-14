@@ -2324,6 +2324,36 @@ command.add(
   end,
 })
 
+-- Separately distributed plugins retain support for editors without a menu bar.
+if core.menu_view then
+  core.menu_view:register({ "tools" }, {
+    { id = "scm", text = "Source Control", items = {
+      { id = "status", text = "Project Status", command = "scm:project-status" },
+      { id = "diff", text = "Project Diff", command = "scm:global-diff" },
+      { id = "history", text = "Commit History", command = "scm:commits-history" },
+      core.menu_view.DIVIDER,
+      { id = "commit", text = "New Commit...", command = "scm:new-commit" },
+      { id = "amend", text = "Amend Current Commit...", command = "scm:amend-current-commit" },
+      { id = "push", text = "Push to Remote", command = "scm:push" },
+      core.menu_view.DIVIDER,
+      { id = "branches", text = "Branches", command = "scm:view-branches" },
+      { id = "new-branch", text = "Create Branch...", command = "scm:create-branch" },
+      { id = "tags", text = "Tags", command = "scm:view-tags" },
+      { id = "new-tag", text = "Create Tag...", command = "scm:create-tag" },
+      core.menu_view.DIVIDER,
+      { id = "file-diff", text = "File Diff", command = "scm:file-diff" },
+      { id = "compare-head", text = "Compare File With HEAD", command = "scm:compare-with-head" },
+      { id = "stage", text = "Stage File", command = "scm:staging-add" },
+      { id = "unstage", text = "Unstage File", command = "scm:staging-remove" },
+      { id = "previous-change", text = "Previous Change", command = "scm:goto-previous-change" },
+      { id = "next-change", text = "Next Change", command = "scm:goto-next-change" },
+      core.menu_view.DIVIDER,
+      { id = "blame", text = "Show Blame", command = "scm:toggle-blame",
+        checked = function() return scm.show_blame end }
+    } }
+  }, "scm")
+end
+
 --------------------------------------------------------------------------------
 -- Keymaps
 --------------------------------------------------------------------------------

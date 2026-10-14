@@ -28,6 +28,10 @@ Follow the usual plugin installation procedure. When opening projects the
 backend will be auto detected by using the backend's `detect()` method. Then
 it will be associated to the project for subsequente use.
 
+On editor versions with the application menu, common SCM commands are also
+available under **Tools > Source Control**. Entries use the same command
+predicates and assigned shortcuts as the command palette.
+
 ## Features
 
 * Support for multiple projects.

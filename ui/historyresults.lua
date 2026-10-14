@@ -13,6 +13,7 @@ local Line = require "widget.line"
 local ListBox = require "widget.listbox"
 local TextBox = require "widget.textbox"
 local ContextMenu = require "core.contextmenu"
+local View = require "core.view"
 
 ---@type plugins.scm
 local scm
@@ -155,20 +156,28 @@ function HistoryResults:selected_is_current_commit()
 end
 
 function HistoryResults:on_mouse_pressed(button, x, y, clicks)
-  if HistoryResults.menu.show_context_menu then
+  if not View.set_floating and HistoryResults.menu.show_context_menu then
     return HistoryResults.menu:on_mouse_pressed(button, x, y, clicks)
   end
   local processed = HistoryResults.super.on_mouse_pressed(self, button, x, y, clicks)
   local handled = false
-  if self.list:mouse_on_top(x, y) then
+  if (button == "right" or not View.set_floating) and self.list:mouse_on_top(x, y) then
     handled = HistoryResults.menu:on_mouse_pressed(button, x, y, clicks)
   end
   return handled or processed
 end
 
-function HistoryResults:on_mouse_moved(x, y, dx, dy)
-  if HistoryResults.menu:on_mouse_moved(x, y) then return true end
-  return HistoryResults.super.on_mouse_moved(self, x, y, dx, dy)
+if not View.set_floating then
+  ---Route popup motion manually on editor versions without floating views.
+  ---@param x number Screen x coordinate
+  ---@param y number Screen y coordinate
+  ---@param dx number Horizontal movement
+  ---@param dy number Vertical movement
+  ---@return boolean? handled Whether the menu or widget handled the motion
+  function HistoryResults:on_mouse_moved(x, y, dx, dy)
+    if HistoryResults.menu:on_mouse_moved(x, y) then return true end
+    return HistoryResults.super.on_mouse_moved(self, x, y, dx, dy)
+  end
 end
 
 ---Add a new commit element to the history.
@@ -262,9 +271,12 @@ function HistoryResults:on_selected(idx, data)
   scm.open_commit_diff(data.hash, self.project_dir)
 end
 
-function HistoryResults:draw()
-  if HistoryResults.super.draw(self) then
-    HistoryResults.menu:draw()
+if not View.set_floating then
+  ---Draw the popup manually on editor versions without floating views.
+  function HistoryResults:draw()
+    if HistoryResults.super.draw(self) then
+      HistoryResults.menu:draw()
+    end
   end
 end
 
@@ -274,7 +286,7 @@ function HistoryResults:update()
   self.background_color = style.background
   self.title:set_position(style.padding.x, style.padding.y)
   if not self.searching or #self.list.rows > 0 then
-    HistoryResults.menu:update()
+    if not View.set_floating then HistoryResults.menu:update() end
     local label = "Commits: "
     if self.searching then
       label = "Loading Commits: "
