@@ -14,6 +14,8 @@ local Object = require "core.object"
 ---@class plugins.scm.backend.filechange
 ---@field status plugins.scm.backend.filestatus
 ---@field staged boolean
+---@field unstaged? boolean
+---@field conflicted? boolean
 ---@field path string
 ---@field new_path string?
 
@@ -48,8 +50,8 @@ local Object = require "core.object"
 ---@field hash string
 ---@field author string
 ---@field date string
----@field summary string
----@field message? string
+---@field summary string Commit subject
+---@field message? string Commit body, excluding the subject
 
 ---@class plugins.scm.backend.blame
 ---@field commit string
@@ -57,14 +59,14 @@ local Object = require "core.object"
 ---@field date string
 
 ---@alias plugins.scm.backend.onexecute fun(proc?:process, errmsg?:string, errcode?:number)
----@alias plugins.scm.backend.ongetdiff fun(diff?:string, cached?:boolean)
+---@alias plugins.scm.backend.ongetdiff fun(diff?:string, cached?:boolean, errmsg?:string)
 ---@alias plugins.scm.backend.ongetfile fun(content?:string)
 ---@alias plugins.scm.backend.ongetbranch fun(branch?:string, cached?:boolean)
 ---@alias plugins.scm.backend.ongetbranches fun(branches?:plugins.scm.backend.branch[], cached?:boolean)
 ---@alias plugins.scm.backend.ongettags fun(tags?:plugins.scm.backend.tag[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetchanges fun(changes?:plugins.scm.backend.filechange[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetcommithistory fun(changes?:plugins.scm.backend.commit[], cached?:boolean)
----@alias plugins.scm.backend.ongetcommit fun(changes:plugins.scm.backend.commit, cached?:boolean)
+---@alias plugins.scm.backend.ongetcommit fun(commit?:plugins.scm.backend.commit, cached?:boolean, errmsg?:string)
 ---@alias plugins.scm.backend.ongetfilestatus fun(status?:plugins.scm.backend.filestatus, cached?:boolean)
 ---@alias plugins.scm.backend.ongetfileblame fun(list?:plugins.scm.backend.blame[], cached?:boolean)
 ---@alias plugins.scm.backend.ongetstaged fun(files?:table<string,boolean>, cached?:boolean)
@@ -229,26 +231,55 @@ function Backend:get_process_lines(proc, from)
   end)
 end
 
+local PROCESS_OUTPUT = setmetatable({}, { __mode = "k" })
+
 ---Gets all the output of the process at once, this function yields
 ---while reading to allow async support when ran from a coroutine.
 ---@param proc process
 ---@param from? string | "stdout" | "stderr"
 ---@return string
 function Backend:get_process_output(proc, from)
-  if not proc then return "" end
-  from = from and "read_" .. from or "read_stdout"
-  local output = ""
+  if not proc then
+    return ""
+  end
+  from = from or "stdout"
+  local cached = PROCESS_OUTPUT[proc]
+  if cached then
+    local output = cached[from] or ""
+    cached[from] = ""
+    return output
+  end
+  local chunks = { stdout = {}, stderr = {} }
   local read_size = 1024 * 10
-  local read = proc[from](proc, read_size)
   local iterations = 0
-  repeat
-    if read ~= nil and read ~= "" then
-      output = output .. read
+  while true do
+    -- Observe exit before reading so the final buffered bytes are drained.
+    local running = proc:running()
+    local received = false
+    -- Drain both pipes: a full stderr pipe can otherwise block stdout/exit.
+    for _, stream in ipairs({ "stdout", "stderr" }) do
+      local reader = proc["read_" .. stream]
+      local read = reader and reader(proc, read_size)
+      if read ~= nil and read ~= "" then
+        chunks[stream][#chunks[stream] + 1] = read
+        received = true
+      end
+    end
+    if not running and not received then
+      break
     end
     iterations = iterations + 1
-    if iterations % 10 == 0 then self:yield() end
-    read = proc[from](proc, read_size)
-  until (read == nil or read == "") and not proc:running()
+    if iterations % 10 == 0 then
+      self:yield()
+    end
+  end
+  cached = {
+    stdout = table.concat(chunks.stdout),
+    stderr = table.concat(chunks.stderr),
+  }
+  PROCESS_OUTPUT[proc] = cached
+  local output = cached[from] or ""
+  cached[from] = ""
   return output
 end
 
@@ -256,10 +287,27 @@ end
 ---@param callback plugins.scm.backend.onexecute
 ---@param directory string Path of project directory
 ---@param ... string parameters to pass to associated command
+---@return boolean started
 function Backend:execute(callback, directory, ...)
-  if not self.command then return false end
+  return self:execute_with_options(
+    callback, self:get_process_options(directory), ...
+  )
+end
+
+---Execute with per-command options without changing shared backend state.
+---@param callback plugins.scm.backend.onexecute
+---@param options process.options
+---@param ... string
+---@return boolean started
+function Backend:execute_with_options(callback, options, ...)
+  if not self.command then
+    local failed = function()
+      callback(nil, self.name .. " executable is unavailable.", -1)
+    end
+    if self.blocking then failed() else core.add_thread(failed) end
+    return false
+  end
   local command = table.pack(self.command, ...)
-  local options = self:get_process_options(directory)
   local proc, errmsg, errcode
   local ran, ranerr = core.try(function()
     proc, errmsg, errcode = process.start(command, options)
@@ -471,6 +519,141 @@ function Backend:delete_tag(tag, commit, directory, callback) callback(false, "n
 ---@diagnostic disable-next-line
 function Backend:get_changes(directory, callback) callback({}, false) end
 
+---Retrieve a review snapshot; staged and unstaged can both be true.
+---@param directory string
+---@param callback fun(changes:table[]?, errmsg?:string)
+function Backend:get_working_changes(directory, callback)
+  self:get_changes(directory, function(list)
+    if not list then
+      callback(nil, "Could not retrieve repository changes.")
+      return
+    end
+    local result = {}
+    for _, entry in ipairs(list) do
+      local copy = {}
+      for k, v in pairs(entry) do
+        copy[k] = v
+      end
+      copy.unstaged = not copy.staged
+      result[#result + 1] = copy
+    end
+    callback(result)
+  end)
+end
+
+---Stage or unstage a review entry, including both paths of a rename.
+---@param entry plugins.scm.backend.filechange
+---@param directory string
+---@param reverse boolean
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:stage_change(entry, directory, reverse, callback)
+  local fn = reverse and self.unstage_file or self.stage_file
+  fn(self, entry.new_path or entry.path, directory, callback)
+end
+
+---Retrieve the index diff for a file, separate from its working tree diff.
+---@param file string
+---@param directory string
+---@param callback fun(diff?:string, errmsg?:string)
+function Backend:get_staged_file_diff(file, directory, callback)
+  callback(nil, "This backend does not have an index diff.")
+end
+
+---@return boolean
+function Backend:supports_partial_staging()
+  return false
+end
+
+---Retrieve an interrupted operation, if the backend has one.
+---@param directory string
+---@param callback fun(operation:table?, errmsg?:string)
+function Backend:get_operation_status(directory, callback)
+  callback(nil)
+end
+
+---Continue or abort an interrupted operation.
+---@param directory string
+---@param operation string
+---@param action "continue"|"abort"|"skip"
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:resolve_operation(directory, operation, action, callback)
+  callback(false, "Operation control is not supported by this backend.")
+end
+
+---@return boolean
+function Backend:supports_stashes()
+  return false
+end
+
+---@param directory string
+---@param callback fun(stashes:table[]?, errmsg?:string)
+function Backend:get_stashes(directory, callback)
+  callback(nil, "Stashes are not supported.")
+end
+
+---@param directory string
+---@param message string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:save_stash(directory, message, callback)
+  callback(false, "Stashes are not supported.")
+end
+
+---@param id string
+---@param directory string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:apply_stash(id, directory, callback)
+  callback(false, "Stashes are not supported.")
+end
+
+---@param id string
+---@param directory string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:delete_stash(id, directory, callback)
+  callback(false, "Stashes are not supported.")
+end
+
+---@param id string
+---@param directory string
+---@param callback fun(diff?:string, errmsg?:string)
+function Backend:get_stash_diff(id, directory, callback)
+  callback(nil, "Stashes are not supported.")
+end
+
+---Apply or reverse a reviewed patch to the index only.
+---@param patch string
+---@param directory string
+---@param reverse boolean
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:apply_index_patch(patch, directory, reverse, callback)
+  callback(false, "Partial staging is not supported by this backend.")
+end
+
+---Retrieve a bounded page of history for the repository workbench.
+---@param directory string
+---@param callback fun(history:table[]?, errmsg?:string)
+---@param target? string
+---@param limit? integer
+---@param target_type? "branch"|"tag"
+function Backend:get_review_history(
+  directory,
+  callback,
+  target,
+  limit,
+  target_type
+)
+  self:get_commit_history(nil, directory, function(history)
+    if not history then
+      callback(nil, "Could not retrieve history.")
+      return
+    end
+    local result = {}
+    for i = 1, math.min(#history, limit or 200) do
+      result[i] = history[i]
+    end
+    callback(result)
+  end, target, target_type or "branch")
+end
+
 ---Retrieve the commit history.
 ---@param path? string If not nil get commit history of specific file or directory.
 ---@param directory string Project directory
@@ -598,13 +781,41 @@ function Backend:amend_commit(directory, commit, message, callback) callback(fal
 ---@diagnostic disable-next-line
 function Backend:pull(directory, callback, username, password, strategy) callback(false, "not implemented") end
 
----Push local changes to the configured remote.
+---@class plugins.scm.backend.pushoptions
+---@field remote string
+---@field branch string Local branch
+---@field target string Destination branch
+---@field upstream? boolean Set upstream tracking
+---@field lease? boolean Force with an explicit expected remote tip
+---@field expected? string Expected remote tip for a force lease
+
+---@class plugins.scm.backend.pushbranch
+---@field name string
+---@field remote? string Default push remote
+---@field target string Default destination branch
+---@field upstream? string Configured upstream reference
+
+---@class plugins.scm.backend.pushtargets
+---@field remotes table[]
+---@field branches plugins.scm.backend.pushbranch[]
+---@field branch? string Current local branch; nil for a detached checkout
+
+---Read local push choices and defaults without contacting a remote.
+---Return nil without an error to retain the backend's normal push workflow.
+---@param directory string Project directory
+---@param callback fun(targets?:plugins.scm.backend.pushtargets,errmsg?:string)
+function Backend:get_push_targets(directory, callback) callback(nil) end
+
+---Push local changes, optionally to an explicit remote and branch.
 ---@param directory string Project directory
 ---@param callback plugins.scm.backend.onexecstatus
 ---@param username? string
 ---@param password? string
+---@param options? plugins.scm.backend.pushoptions
 ---@diagnostic disable-next-line
-function Backend:push(directory, callback, username, password) callback(false, "not implemented") end
+function Backend:push(directory, callback, username, password, options)
+  callback(false, "not implemented")
+end
 
 ---Fetch remote references without updating the current checkout.
 ---@param directory string Project directory
@@ -681,5 +892,198 @@ function Backend:remove_path(path, directory, callback) callback(false, "not imp
 ---@diagnostic disable-next-line
 function Backend:move_path(from, to, directory, callback) callback(false, "not implemented") end
 
+---Optional repository tools. Unsupported operations fail explicitly.
+---@return table<string,boolean>
+function Backend:get_capabilities()
+  return {}
+end
+
+---Initialize an existing directory without adding or committing its files.
+---@param directory string
+---@param callback plugins.scm.backend.onexecstatus
+---@param options? table Backend-specific branch, repository and username
+function Backend:init_repository(directory, callback, options)
+  callback(false, "Initializing repositories is not supported.")
+end
+
+---Optional named input descriptors for repository initialization.
+---@param directory string
+---@return table[]
+function Backend:get_init_options(directory)
+  return {}
+end
+
+---@param directory string
+---@param callback fun(remotes?:table[], errmsg?:string)
+function Backend:get_remotes(directory, callback)
+  callback(nil, "Remote management is not supported.")
+end
+
+---Create a named remote without fetching or changing the checkout.
+---@param directory string
+---@param name string
+---@param url string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:add_remote(directory, name, url, callback)
+  callback(false, "Adding remotes is not supported.")
+end
+
+---@param directory string
+---@param name string
+---@param url string Empty push URL restores fetch-URL fallback on Git
+---@param push boolean Edit the push URL instead of the fetch URL
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:set_remote_url(directory, name, url, push, callback)
+  callback(false, "Editing remotes is not supported.")
+end
+
+---@param directory string
+---@param name string
+---@param new_name string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:rename_remote(directory, name, new_name, callback)
+  callback(false, "Renaming remotes is not supported.")
+end
+
+---@param directory string
+---@param name string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:remove_remote(directory, name, callback)
+  callback(false, "Removing remotes is not supported.")
+end
+
+---@param directory string
+---@param name string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:set_default_remote(directory, name, callback)
+  callback(false, "Setting a default remote is not supported.")
+end
+
+---@param directory string
+---@param remote string
+---@param name string
+---@param kind "branch"|"tag"
+---@param callback fun(hash?:string, errmsg?:string)
+function Backend:get_remote_ref_tip(directory, remote, name, kind, callback)
+  callback(nil, "Remote references are not supported.")
+end
+
+---@param directory string
+---@param callback fun(status?:table, errmsg?:string)
+---@param limit? integer
+function Backend:get_sync_history(directory, callback, limit)
+  callback(nil, "This backend does not expose remote-tracking history.")
+end
+
+---@param directory string
+---@param remote string
+---@param name string
+---@param kind "branch"|"tag"
+---@param options table Includes optional target ref name
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:push_ref(directory, remote, name, kind, options, callback)
+  callback(false, "Selective remote ref operations are not supported.")
+end
+
+---@param source string
+---@param target string
+---@param directory string
+---@param callback plugins.scm.backend.onexecstatus
+---@param strategy? string
+function Backend:merge_branch(source, target, directory, callback, strategy)
+  callback(false, "Branch merging is not supported.")
+end
+
+---@param path string
+---@param directory string
+---@param callback fun(versions?:table<string,string>, errmsg?:string)
+function Backend:get_conflict_versions(path, directory, callback)
+  callback(nil, "Conflict versions are unavailable.")
+end
+
+---@param path? string
+---@param directory string
+---@param callback fun(diff?:string, errmsg?:string)
+---@param options? table
+function Backend:get_review_diff(path, directory, callback, options)
+  if options and options.staged and path then
+    self:get_staged_file_diff(path, directory, callback)
+  elseif path then
+    self:get_file_diff(path, directory, callback)
+  else
+    self:get_diff(directory, callback)
+  end
+end
+
+---@param path string
+---@param directory string
+---@param callback fun(versions?:table, errmsg?:string)
+---@param staged? boolean
+function Backend:get_review_versions(path, directory, callback, staged)
+  callback(nil, "Binary version comparison is not supported.")
+end
+
+---@param directory string
+---@param query table
+---@param callback fun(history?:table[], errmsg?:string)
+---@param limit? integer
+---@param target? string
+function Backend:search_history(directory, query, callback, limit, target)
+  self:get_review_history(directory, callback, target, limit)
+end
+
+---@param directory string
+---@param callback fun(items?:table[], errmsg?:string)
+function Backend:get_worktrees(directory, callback)
+  callback(nil, "Worktrees are not supported.")
+end
+
+---@param directory string
+---@param path string
+---@param branch string
+---@param callback plugins.scm.backend.onexecstatus
+---@param new_branch? string Create this branch from branch when provided
+function Backend:add_worktree(directory, path, branch, callback, new_branch)
+  callback(false, "Worktrees are not supported.")
+end
+
+---@param directory string
+---@param path string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:remove_worktree(directory, path, callback)
+  callback(false, "Worktrees are not supported.")
+end
+
+---@param directory string
+---@param callback fun(items?:table[], errmsg?:string)
+function Backend:get_submodules(directory, callback)
+  callback(nil, "Submodules are not supported.")
+end
+
+---@param directory string
+---@param path string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:update_submodule(directory, path, callback)
+  callback(false, "Submodules are not supported.")
+end
+
+---@param directory string
+---@param callback fun(items?:table[], errmsg?:string)
+function Backend:get_lfs_files(directory, callback)
+  callback(nil, "LFS is not supported.")
+end
+
+---@param directory string
+---@param callback plugins.scm.backend.onexecstatus
+function Backend:fetch_lfs(directory, callback)
+  callback(false, "LFS is not supported.")
+end
+
+---@param directory string
+---@param plan table[] Oldest-to-newest pick/squash/drop instructions.
+---@param callback fun(success:boolean, errmsg?:string, backup?:string)
+function Backend:rewrite_history(directory, plan, callback)
+  callback(false, "History rewriting is not supported.")
+end
 
 return Backend

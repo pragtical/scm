@@ -1,4 +1,3 @@
-local core = require "core"
 ---@type core.doc
 local Doc = require "core.doc"
 ---@type core.docview
@@ -48,46 +47,16 @@ function ReadDoc:save(...) end
 
 ---A readonly core.docview
 ---@class plugins.scm.ui.readdocview : core.docview
----@overload fun(title?:string, text?:string):plugins.scm.ui.readdocview
+---@overload fun(title:string, text:string):plugins.scm.ui.readdocview
 local ReadDocView = DocView:extend()
 
 ---Constructor
----@param title? string
----@param text? string
+---@param title string
+---@param text string
 function ReadDocView:new(title, text)
-  self.visible = false
-
-  -- close when automatically loaded from workspace plugin
-  if not title or not text then
-    ReadDocView.super.new(self, Doc())
-    core.add_thread(function()
-      -- core should offer a function to easily close a view...
-      local parent = core.root_view.root_node:get_node_for_view(self)
-      if parent then
-        parent:close_view(core.root_view.root_node, self)
-      end
-    end)
-    return
-  end
-  
   ReadDocView.super.new(self, ReadDoc(title, text))
-  self.visible = true
 end
 
-function ReadDocView:draw()
-  if not self.visible then return end
-  ReadDocView.super.draw(self)
-end
-
-function ReadDocView:update()
-  if not self.visible then return end
-  ReadDocView.super.update(self)
-end
-
-function ReadDocView:get_name()
-  if not self.visible then return end
-  return ReadDocView.super.get_name(self)
-end
-
+function ReadDocView:get_state() return nil end
 
 return ReadDocView

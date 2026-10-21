@@ -92,30 +92,48 @@ function CredentialsDialog:update_size_position()
   CredentialsDialog.super.update_size_position(self)
 
   local padding = style.padding.x / 2
-  local width = math.max(420 * SCALE, core.root_view.size.x * 0.32)
-  local height = math.max(220 * SCALE, core.root_view.size.y * 0.24)
+  local width = math.min(
+    core.root_view.size.x - 40 * SCALE,
+    math.max(420 * SCALE, core.root_view.size.x * 0.32)
+  )
+  local height = math.min(
+    core.root_view.size.y - 60 * SCALE,
+    math.max(240 * SCALE, core.root_view.size.y * 0.24)
+  )
   self:set_size(width, height)
-  local panel_height = self.panel:get_height()
+  self.panel:set_size(width, height - self.title:get_height() - style.padding.y)
 
   self.username_label:set_position(padding, 0)
   self.username_textbox:set_position(
     padding,
     self.username_label:get_bottom() + style.padding.y / 2
   )
-  self.username_textbox:set_size(width - style.padding.x, self.username_textbox:get_real_height())
+  self.username_textbox:set_size(
+    width - style.padding.x,
+    self.username_textbox:get_real_height()
+  )
 
-  self.password_label:set_position(padding, self.username_textbox:get_bottom() + style.padding.y)
+  self.password_label:set_position(
+    padding,
+    self.username_textbox:get_bottom() + style.padding.y
+  )
   self.password_textbox:set_position(
     padding,
     self.password_label:get_bottom() + style.padding.y / 2
   )
-  self.password_textbox:set_size(width - style.padding.x, self.password_textbox:get_real_height())
+  self.password_textbox:set_size(
+    width - style.padding.x,
+    self.password_textbox:get_real_height()
+  )
 
-  local buttons_y = panel_height - self.connect:get_height() - (style.padding.y / 2)
+  local buttons_y = self.password_textbox:get_bottom() + style.padding.y * 2
   self.line:set_position(0, buttons_y - style.padding.y)
 
   self.connect:set_position(padding, buttons_y)
-  self.cancel:set_position(self.connect:get_right() + style.padding.x, buttons_y)
+  self.cancel:set_position(
+    self.connect:get_right() + style.padding.x,
+    buttons_y
+  )
 
   self.close:set_position(
     self.size.x - self.close.size.x - (style.padding.x / 2),

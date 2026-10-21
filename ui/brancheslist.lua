@@ -13,7 +13,6 @@ local Line = require "widget.line"
 local ListBox = require "widget.listbox"
 local TextBox = require "widget.textbox"
 local ContextMenu = require "core.contextmenu"
-local View = require "core.view"
 local MessageBox = require "widget.messagebox"
 
 ---@type plugins.scm
@@ -34,24 +33,13 @@ local BranchesList = Widget:extend()
 
 ---@type core.contextmenu
 BranchesList.menu = ContextMenu()
+require "plugins.scm.ui.listmenu" (BranchesList.menu)
 
 ---Constructor
 ---@param project_dir string
 ---@param backend plugins.scm.backend
 function BranchesList:new(project_dir, backend)
   BranchesList.super.new(self)
-
-  -- close when automatically loaded from workspace plugin
-  if not project_dir then
-    core.add_thread(function()
-      -- core should offer a function to easily close a view...
-      local parent = core.root_view.root_node:get_node_for_view(self)
-      if parent then
-        parent:close_view(core.root_view.root_node, self)
-      end
-    end)
-    return
-  end
 
   if not scm then
     scm = require "plugins.scm"
@@ -111,28 +99,12 @@ function BranchesList:get_selected_data()
 end
 
 function BranchesList:on_mouse_pressed(button, x, y, clicks)
-  if not View.set_floating and BranchesList.menu.show_context_menu then
-    return BranchesList.menu:on_mouse_pressed(button, x, y, clicks)
-  end
   local processed = BranchesList.super.on_mouse_pressed(self, button, x, y, clicks)
   local handled = false
-  if (button == "right" or not View.set_floating) and self.list:mouse_on_top(x, y) then
+  if button == "right" and self.list:mouse_on_top(x, y) then
     handled = BranchesList.menu:on_mouse_pressed(button, x, y, clicks)
   end
   return handled or processed
-end
-
-if not View.set_floating then
-  ---Route popup motion manually on editor versions without floating views.
-  ---@param x number Screen x coordinate
-  ---@param y number Screen y coordinate
-  ---@param dx number Horizontal movement
-  ---@param dy number Vertical movement
-  ---@return boolean? handled Whether the menu or widget handled the motion
-  function BranchesList:on_mouse_moved(x, y, dx, dy)
-    if BranchesList.menu:on_mouse_moved(x, y) then return true end
-    return BranchesList.super.on_mouse_moved(self, x, y, dx, dy)
-  end
 end
 
 ---Add a new branch element to the list.
@@ -210,22 +182,12 @@ function BranchesList:stop_searching()
   self.searching = false
 end
 
-if not View.set_floating then
-  ---Draw the popup manually on editor versions without floating views.
-  function BranchesList:draw()
-    if BranchesList.super.draw(self) then
-      BranchesList.menu:draw()
-    end
-  end
-end
-
 function BranchesList:update()
   if not BranchesList.super.update(self) then return end
   -- update the positions and sizes
   self.background_color = style.background
   self.title:set_position(style.padding.x, style.padding.y)
   if not self.searching or #self.list.rows > 0 then
-    if not View.set_floating then BranchesList.menu:update() end
     local label = "Branches: "
     if self.searching then
       label = "Loading Branches: "
@@ -453,5 +415,7 @@ BranchesList.menu:register(
     { text = "Force Delete Branch", command = "scm-branches:force-delete" }
 })
 
+
+require "plugins.scm.ui.refactions"(BranchesList, "scm-branches", "branch")
 
 return BranchesList

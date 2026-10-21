@@ -5,6 +5,8 @@ local Doc = require "core.doc"
 local DocView = require "core.docview"
 local Highlighter = require "core.doc.highlighter"
 local MessageBox = require "widget.messagebox"
+local Widget = require "widget"
+local Button = require "widget.button"
 
 local TITLE_LIMIT = 50
 local BODY_LIMIT = 72
@@ -292,6 +294,86 @@ function CommitMessageView:new(project_dir, backend, status, mode, commit, messa
   self.mode = mode or "commit"
   self.commit = commit
   doc.view = self
+  self.review_toolbar = Widget(nil, false)
+  self.review_toolbar.defer_draw = false
+  self.review_button = Button(self.review_toolbar, "Review Changes...")
+  self.review_button.on_click = function() self:review_changes() end
+  self.review_toolbar:show()
+end
+
+function CommitMessageView:review_changes()
+  local node = core.root_view.root_node:get_node_for_view(self)
+  if not node then
+    return
+  end
+  if
+    self.review_view
+    and core.root_view.root_node:get_node_for_view(self.review_view)
+  then
+    self.review_view:refresh()
+    return
+  end
+  local Workbench = require "plugins.scm.ui.workbench"
+  local view = Workbench(self.project_dir, self.backend)
+  if self.backend:has_staging() then
+    view.mode = "staged"
+    view:refresh()
+  end
+  self.review_view = view
+  node:split(node.size.x >= 1000 * SCALE and "right" or "down", view)
+  core.set_active_view(self)
+end
+
+function CommitMessageView:get_content_offset()
+  local x, y = CommitMessageView.super.get_content_offset(self)
+  return x, y + (self.review_height or 0)
+end
+
+function CommitMessageView:get_scrollable_size()
+  return CommitMessageView.super.get_scrollable_size(self)
+    + (self.review_height or 0)
+end
+
+function CommitMessageView:update()
+  CommitMessageView.super.update(self)
+  self.review_toolbar.position.x = self.position.x
+  self.review_toolbar.position.y = self.position.y
+  self.review_toolbar.size.x = self.size.x
+  self.review_height = self.review_button:get_height() + style.padding.y
+  self.review_toolbar.size.y = self.review_height
+  self.review_button:set_position(style.padding.x / 2, style.padding.y / 2)
+  self.review_toolbar:update()
+end
+
+function CommitMessageView:draw()
+  core.push_clip_rect(
+    self.position.x,
+    self.position.y + (self.review_height or 0),
+    self.size.x,
+    math.max(0, self.size.y - (self.review_height or 0))
+  )
+  CommitMessageView.super.draw(self)
+  core.pop_clip_rect()
+  self.review_toolbar:draw()
+end
+
+function CommitMessageView:on_mouse_pressed(button, x, y, clicks)
+  if y < self.position.y + (self.review_height or 0) then
+    return self.review_toolbar:on_mouse_pressed(button, x, y, clicks)
+  end
+  return CommitMessageView.super.on_mouse_pressed(self, button, x, y, clicks)
+end
+
+function CommitMessageView:on_mouse_released(...)
+  if self.review_toolbar:on_mouse_released(...) then
+    return true
+  end
+  return CommitMessageView.super.on_mouse_released(self, ...)
+end
+
+function CommitMessageView:on_mouse_moved(...)
+  self.review_toolbar:on_mouse_moved(...)
+  return CommitMessageView.super.on_mouse_moved(self, ...)
 end
 
 function CommitMessageView:get_name()

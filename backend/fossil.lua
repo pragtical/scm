@@ -4,6 +4,15 @@
 local common = require "core.common"
 local Backend = require "plugins.scm.backend"
 local changes = require "plugins.scm.changes"
+local fossildiff = require "plugins.scm.backend.fossildiff"
+local tools = require "plugins.scm.backend.tools"
+local json = require "core.json"
+
+local function read_diff(self, directory, args, callback, options)
+  fossildiff.read(self, directory, args, function(text, errmsg)
+    callback(text, false, errmsg)
+  end, options)
+end
 
 ---@class plugins.scm.backend.fossil : plugins.scm.backend
 ---@field super plugins.scm.backend
@@ -11,6 +20,160 @@ local Fossil = Backend:extend()
 
 function Fossil:new()
   self.super.new(self, "Fossil", "fossil")
+end
+
+---@param directory string
+---@param callback fun(changes:table[]?, errmsg?:string)
+function Fossil:get_working_changes(directory, callback)
+  self:execute(
+    function(proc)
+      local stdout = self:get_process_output(proc, "stdout")
+      local stderr = self:get_process_output(proc, "stderr")
+      if not proc or proc:returncode() ~= 0 then
+        callback(
+          nil,
+          stderr ~= "" and stderr or "Could not read Fossil changes."
+        )
+        return
+      end
+      local statuses = {
+        ADDED = "added",
+        DELETED = "deleted",
+        MISSING = "deleted",
+        RENAMED = "renamed",
+        EXTRA = "untracked",
+      }
+      local list = {}
+      for line in stdout:gmatch "[^\n]+" do
+        local kind, path = line:match "^(%S+)%s+(.+)$"
+        if path then
+          local old, new = path:match "^(.-)  %->  (.+)$"
+          list[#list + 1] = {
+            path = common.normalize_path(directory .. PATHSEP .. (old or path)),
+            new_path = new
+              and common.normalize_path(directory .. PATHSEP .. new),
+            status = statuses[kind] or "edited",
+            unstaged = true,
+            staged = false,
+            conflicted = kind == "CONFLICT",
+          }
+        end
+        if #list % 100 == 0 then
+          self:yield()
+        end
+      end
+      callback(list)
+    end,
+    directory,
+    "changes",
+    "--differ",
+    "--classify",
+    "--rel-paths",
+    "--no-merge"
+  )
+end
+
+---@param directory string
+---@param callback fun(history:table[]?, errmsg?:string)
+---@param target? string
+---@param limit? integer
+---@param target_type? "branch"|"tag"
+function Fossil:get_review_history(
+  directory,
+  callback,
+  target,
+  limit,
+  target_type
+)
+  local params = {
+    "timeline",
+    "-t",
+    "ci",
+    "-n",
+    tostring(limit or 200),
+    "-W",
+    "0",
+    "-F",
+    "'%a' %H '%d' %c",
+  }
+  if target and target_type == "tag" then
+    table.insert(params, 2, "ancestors")
+    table.insert(params, 3, target)
+  elseif target then
+    params[#params + 1], params[#params + 2] = "-b", target
+  end
+  self:execute(function(proc)
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if not proc or proc:returncode() ~= 0 then
+      callback(nil, stderr)
+      return
+    end
+    local history = {}
+    for line in stdout:gmatch "[^\n]+" do
+      local author, hash, date, summary =
+        line:match "^'(.-)' (%S+) '(.-)' (.*)$"
+      if hash then
+        history[#history + 1] =
+          { hash = hash, author = author, date = date, summary = summary }
+      end
+      if #history % 100 == 0 then
+        self:yield()
+      end
+    end
+    callback(history)
+  end, directory, table.unpack(params))
+end
+
+---@return boolean
+function Fossil:supports_stashes()
+  return true
+end
+
+function Fossil:get_stashes(directory, callback)
+  self:execute(function(proc)
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if not proc or proc:returncode() ~= 0 then
+      callback(nil, stderr)
+      return
+    end
+    local list, entry = {}, nil
+    for line in stdout:gmatch "[^\n]+" do
+      local id, details = line:match "^%s*(%d+):%s*(.*)$"
+      if id then
+        entry = { id = id, name = "Stash " .. id, message = details }
+        list[#list + 1] = entry
+      elseif entry and line:match "^%s+" then
+        entry.message = entry.message .. " " .. line:gsub("^%s+", "")
+      end
+    end
+    callback(list)
+  end, directory, "stash", "list", "-W", "0")
+end
+
+function Fossil:save_stash(directory, message, callback)
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, directory, "stash", "save", "-m", message)
+end
+
+function Fossil:apply_stash(id, directory, callback)
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, directory, "stash", "apply", id)
+end
+
+function Fossil:delete_stash(id, directory, callback)
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, directory, "stash", "drop", id)
+end
+
+function Fossil:get_stash_diff(id, directory, callback)
+  fossildiff.read(self, directory, {
+    "stash", "show", id, "--internal", "--unified", "--verbose",
+  }, callback, { stash = id })
 end
 
 ---@param errmsg? string
@@ -164,25 +327,25 @@ end
 
 function Fossil:detect(directory)
   if not self.command then return false end
-  local list = system.list_dir(directory)
-  if list then
-    for _, file in ipairs(list) do
-      if file == ".fslckout" then
-        return true
-      end
-    end
-  end
-  return false
+  return system.get_file_info(directory .. PATHSEP .. ".fslckout") ~= nil
+    or system.get_file_info(directory .. PATHSEP .. "_FOSSIL_") ~= nil
 end
 
 ---@param directory string
 function Fossil:watch_project(directory)
-  self.watch:watch(directory .. PATHSEP .. ".fslckout")
+  -- SQLite closes read/write handles even when queries change no data.
+  -- Native close-write notifications would trigger another status query.
+  for _, marker in ipairs({ ".fslckout", "_FOSSIL_" }) do
+    local path = directory .. PATHSEP .. marker
+    if system.get_file_info(path) then self.watch:scan(path) end
+  end
 end
 
 ---@param directory string
 function Fossil:unwatch_project(directory)
-  self.watch:unwatch(directory .. PATHSEP .. ".fslckout")
+  for _, marker in ipairs({ ".fslckout", "_FOSSIL_" }) do
+    self.watch:unwatch(directory .. PATHSEP .. marker)
+  end
 end
 
 ---@param callback plugins.scm.backend.ongetbranch
@@ -448,8 +611,10 @@ end
 ---@param callback plugins.scm.backend.oncherrypickstatus
 function Fossil:cherry_pick(commit, directory, callback)
   self:get_commit_info(commit, directory, function(info)
-    local message = info and (info.message or info.summary)
-      or ("Cherry-picked commit " .. commit)
+    local message = info and info.summary or ("Cherry-picked commit " .. commit)
+    if info and info.message and info.message ~= "" then
+      message = message .. "\n\n" .. info.message
+    end
     message = (message and message ~= "" and message or ("Cherry-picked commit " .. commit))
       .. "\n\nCherry-picked-from: " .. commit
 
@@ -547,49 +712,7 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetchanges
 function Fossil:get_changes(directory, callback)
-  directory = directory:gsub("[/\\]$", "")
-  self:execute(function(proc)
-    if not proc then
-      callback(nil)
-      return
-    end
-    ---@type plugins.scm.backend.filechange[]
-    local changes = {}
-    local output = self:get_process_output(proc, "stdout")
-    if proc:returncode() ~= 0 then
-      callback(nil)
-      return
-    end
-    local iterations = 1
-    for line in output:gmatch("[^\n]+") do
-      if line ~= "" then
-        local status, path = line:match("%s*(%S+)%s+(%S+)")
-        local new_path = nil
-        if status and path then
-          if status == "ADDED" then
-            status = "added"
-          elseif status == "DELETED" then
-            status = "deleted"
-          elseif status == "EDITED" then
-            status = "edited"
-          elseif status == "RENAMED" then
-            status = "renamed"
-            new_path = line:match("%s*%S+%s+%S+%s*%S+%s*(%S+)")
-          elseif status == "EXTRA" then
-            status = "untracked"
-          end
-          table.insert(changes, {
-            status = status,
-            path = directory .. PATHSEP .. path,
-            new_path = new_path and (directory .. PATHSEP .. new_path) or nil
-          })
-        end
-      end
-      if iterations % 100 == 0 then self:yield() end
-      iterations = iterations + 1
-    end
-    callback(changes)
-  end, directory, "changes", "--differ")
+  self:get_working_changes(directory, callback)
 end
 
 ---@param path? string
@@ -684,30 +807,35 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetcommit
 function Fossil:get_commit_info(id, directory, callback)
-  self:execute(function(proc)
-    ---@type plugins.scm.backend.commit
-    local commit = {}
-    for idx, line in self:get_process_lines(proc, "stdout") do
-      if not commit.hash then
-        commit.hash, commit.date = line:match("hash:%s+([a-zA-Z0-9]+)%s+(.*)$")
-      elseif not commit.summary then
-        commit.summary, commit.author = line:match("comment:%s+(.-)%s+%(user: (.-)%)$")
-      else
-        if commit.message then
-          commit.message = commit.message .. "\n" .. (line:match("(.+)") or "")
-        elseif line ~= "" then
-          commit.message = (line:match("(.*)") or "")
-        end
-        if idx % 10 == 0 then self:yield() end
+  if not tools.safe_ref(id) then
+    callback(nil, false, "Invalid commit.")
+    return
+  end
+  if id == "current" then
+    self:get_current_commit(directory, function(hash)
+      if hash then self:get_commit_info(hash, directory, callback)
+      else callback(nil, false, "Could not determine the current commit.") end
+    end)
+    return
+  end
+  local sql = "SELECT b.uuid AS hash, coalesce(e.euser,e.user,'') AS author,"
+    .. "datetime(e.mtime) AS date,"
+    .. "coalesce(e.ecomment,e.comment,'') AS message "
+    .. "FROM event e JOIN blob b ON b.rid=e.objid "
+    .. "WHERE e.type='ci' AND e.objid=symbolic_name_to_rid('"
+    .. id:gsub("'", "''") .. "')"
+  tools.run(self, directory, { "sql", "--readonly", "-json", sql },
+    function(output, errmsg)
+      if not output then callback(nil, false, errmsg) return end
+      local ok, rows = pcall(json.decode, output == "" and "[]" or output)
+      local commit = ok and type(rows) == "table" and rows[1]
+      if not commit or type(commit.message) ~= "string" then
+        callback(nil, false, "Could not read Fossil commit details.")
+        return
       end
-    end
-
-    if commit.message then
-      commit.message = commit.message:match("(.*)%s+$")
-    end
-
-    callback(commit)
-  end, directory, "info", id)
+      commit.summary, commit.message = tools.split_message(commit.message)
+      callback(commit)
+    end)
 end
 
 ---@param directory string Project directory
@@ -727,10 +855,9 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
 function Fossil:get_commit_diff(id, directory, callback)
-  self:execute(function(proc)
-    local diff = self:get_process_output(proc, "stdout")
-    callback(diff)
-  end, directory, "diff", "--unified", "-ci", id)
+  read_diff(self, directory, {
+    "diff", "--internal", "--unified", "--verbose", "--versions", "-ci", id,
+  }, callback, { historical = true })
 end
 
 ---@param branch string
@@ -738,10 +865,10 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
 function Fossil:get_branch_diff(branch, head_branch, directory, callback)
-  self:execute(function(proc)
-    local diff = self:get_process_output(proc, "stdout")
-    callback(diff)
-  end, directory, "diff", "--branch", branch)
+  read_diff(self, directory, {
+    "diff", "--internal", "--unified", "--verbose", "--versions",
+    "--branch", branch,
+  }, callback, { historical = true })
 end
 
 ---@param tag string
@@ -749,10 +876,10 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
 function Fossil:get_tag_diff(tag, head_branch, directory, callback)
-  self:execute(function(proc)
-    local diff = self:get_process_output(proc, "stdout")
-    callback(diff)
-  end, directory, "diff", "--from", tag, "--to", head_branch)
+  read_diff(self, directory, {
+    "diff", "--internal", "--unified", "--verbose", "--versions",
+    "--from", tag, "--to", head_branch,
+  }, callback, { historical = true })
 end
 
 ---@param id? string
@@ -775,19 +902,18 @@ end
 ---@param directory string
 ---@param callback plugins.scm.backend.ongetdiff
 function Fossil:get_diff(directory, callback)
-  self:execute(function(proc)
-    local diff = self:get_process_output(proc, "stdout")
-    callback(diff)
-  end, directory, "diff")
+  read_diff(self, directory, {
+    "diff", "--internal", "--unified", "--verbose",
+  }, callback)
 end
 
 ---@param file string
 ---@param callback plugins.scm.backend.ongetdiff
 function Fossil:get_file_diff(file, directory, callback)
-  self:execute(function(proc)
-    local diff = self:get_process_output(proc, "stdout")
-    callback(diff)
-  end, directory, "diff", common.relative_path(directory, file))
+  local path = common.relative_path(directory, file)
+  read_diff(self, directory, {
+    "diff", "--internal", "--unified", "--verbose", "--", path,
+  }, callback, { path = path })
 end
 
 ---@param file string
@@ -1071,5 +1197,7 @@ function Fossil:move_path(from, to, directory, callback)
   )
 end
 
+
+require "plugins.scm.backend.fossiltools"(Fossil)
 
 return Fossil

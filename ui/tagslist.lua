@@ -13,7 +13,6 @@ local Line = require "widget.line"
 local ListBox = require "widget.listbox"
 local TextBox = require "widget.textbox"
 local ContextMenu = require "core.contextmenu"
-local View = require "core.view"
 local MessageBox = require "widget.messagebox"
 
 ---@type plugins.scm
@@ -34,21 +33,12 @@ local TagsList = Widget:extend()
 
 ---@type core.contextmenu
 TagsList.menu = ContextMenu()
+require "plugins.scm.ui.listmenu" (TagsList.menu)
 
 ---@param project_dir string
 ---@param backend plugins.scm.backend
 function TagsList:new(project_dir, backend)
   TagsList.super.new(self)
-
-  if not project_dir then
-    core.add_thread(function()
-      local parent = core.root_view.root_node:get_node_for_view(self)
-      if parent then
-        parent:close_view(core.root_view.root_node, self)
-      end
-    end)
-    return
-  end
 
   if not scm then
     scm = require "plugins.scm"
@@ -107,28 +97,12 @@ function TagsList:get_selected_data()
 end
 
 function TagsList:on_mouse_pressed(button, x, y, clicks)
-  if not View.set_floating and TagsList.menu.show_context_menu then
-    return TagsList.menu:on_mouse_pressed(button, x, y, clicks)
-  end
   local processed = TagsList.super.on_mouse_pressed(self, button, x, y, clicks)
   local handled = false
-  if (button == "right" or not View.set_floating) and self.list:mouse_on_top(x, y) then
+  if button == "right" and self.list:mouse_on_top(x, y) then
     handled = TagsList.menu:on_mouse_pressed(button, x, y, clicks)
   end
   return handled or processed
-end
-
-if not View.set_floating then
-  ---Route popup motion manually on editor versions without floating views.
-  ---@param x number Screen x coordinate
-  ---@param y number Screen y coordinate
-  ---@param dx number Horizontal movement
-  ---@param dy number Vertical movement
-  ---@return boolean? handled Whether the menu or widget handled the motion
-  function TagsList:on_mouse_moved(x, y, dx, dy)
-    if TagsList.menu:on_mouse_moved(x, y) then return true end
-    return TagsList.super.on_mouse_moved(self, x, y, dx, dy)
-  end
 end
 
 ---@param tag plugins.scm.backend.tag
@@ -200,21 +174,11 @@ function TagsList:stop_searching()
   self.searching = false
 end
 
-if not View.set_floating then
-  ---Draw the popup manually on editor versions without floating views.
-  function TagsList:draw()
-    if TagsList.super.draw(self) then
-      TagsList.menu:draw()
-    end
-  end
-end
-
 function TagsList:update()
   if not TagsList.super.update(self) then return end
   self.background_color = style.background
   self.title:set_position(style.padding.x, style.padding.y)
   if not self.searching or #self.list.rows > 0 then
-    if not View.set_floating then TagsList.menu:update() end
     local label = self.searching and "Loading Tags: " or "Tags: "
     self.title:set_label(
       label
@@ -425,5 +389,7 @@ TagsList.menu:register(
     { text = "Edit Tag", command = "scm-tags:edit" },
     { text = "Delete Tag", command = "scm-tags:delete" }
 })
+
+require "plugins.scm.ui.refactions"(TagsList, "scm-tags", "tag")
 
 return TagsList

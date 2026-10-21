@@ -4,6 +4,8 @@
 local common = require "core.common"
 local Backend = require "plugins.scm.backend"
 local changes = require "plugins.scm.changes"
+local review = require "plugins.scm.review"
+local tools = require "plugins.scm.backend.tools"
 
 ---Get top level git directory of path in order to support submodules.
 ---@param directory string
@@ -67,15 +69,7 @@ end
 
 function Git:detect(directory)
   if not self.command then return false end
-  local list = system.list_dir(directory)
-  if list then
-    for _, file in ipairs(list) do
-      if file == ".git" then
-        return true
-      end
-    end
-  end
-  return false
+  return system.get_file_info(directory .. PATHSEP .. ".git") ~= nil
 end
 
 ---@param directory string
@@ -95,6 +89,294 @@ end
 ---@return boolean
 function Git:has_staging()
   return true
+end
+
+---@param directory string
+---@param callback fun(changes:table[]?, errmsg?:string)
+function Git:get_working_changes(directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(
+    function(proc)
+      local stdout = self:get_process_output(proc, "stdout")
+      local stderr = self:get_process_output(proc, "stderr")
+      if not proc or proc:returncode() ~= 0 then
+        callback(nil, stderr ~= "" and stderr or "Could not read Git status.")
+        return
+      end
+      callback(review.git_status(stdout, directory, function()
+        self:yield()
+      end))
+    end,
+    directory,
+    "--no-optional-locks",
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=all"
+  )
+end
+
+---@param file string
+---@param directory string
+---@param callback fun(diff?:string, errmsg?:string)
+function Git:get_staged_file_diff(file, directory, callback)
+  directory = git_repo_dir(directory, file)
+  self:execute(
+    function(proc)
+      local stdout = self:get_process_output(proc, "stdout")
+      local stderr = self:get_process_output(proc, "stderr")
+      if not proc or proc:returncode() ~= 0 then
+        callback(nil, stderr ~= "" and stderr or "Could not read index diff.")
+      else
+        callback(stdout)
+      end
+    end,
+    directory,
+    "--no-optional-locks",
+    "diff",
+    "--cached",
+    "--no-ext-diff",
+    "--no-color",
+    "--",
+    common.relative_path(directory, file)
+  )
+end
+
+---@param entry plugins.scm.backend.filechange
+---@param directory string
+---@param reverse boolean
+---@param callback plugins.scm.backend.onexecstatus
+function Git:stage_change(entry, directory, reverse, callback)
+  if not self.command then
+    callback(false, "Git executable is unavailable.")
+    return
+  end
+  directory = git_repo_dir(directory)
+  local params = reverse and { "reset", "-q", "HEAD", "--" }
+    or { "add", "--all", "--" }
+  params[#params + 1] = common.relative_path(directory, entry.path)
+  if entry.new_path then
+    params[#params + 1] = common.relative_path(directory, entry.new_path)
+  end
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, directory, table.unpack(params))
+end
+
+---@return boolean
+function Git:supports_partial_staging()
+  return true
+end
+
+---@param directory string
+---@param callback fun(operation:table?, errmsg?:string)
+function Git:get_operation_status(directory, callback)
+  directory = git_repo_dir(directory)
+  self:execute(function(proc)
+    local stdout = self:get_process_output(proc, "stdout")
+    if not proc or proc:returncode() ~= 0 then
+      callback(nil)
+      return
+    end
+    local gitdir = stdout:gsub("[\r\n]+$", "")
+    for _, op in ipairs({
+      { "rebase", "rebase-merge" },
+      { "rebase", "rebase-apply" },
+      { "cherry-pick", "CHERRY_PICK_HEAD" },
+      { "revert", "REVERT_HEAD" },
+      { "merge", "MERGE_HEAD" },
+    }) do
+      if system.get_file_info(gitdir .. PATHSEP .. op[2]) then
+        callback({ kind = op[1] })
+        return
+      end
+    end
+    callback(nil)
+  end, directory, "--no-optional-locks", "rev-parse", "--absolute-git-dir")
+end
+
+---@param directory string
+---@param operation string
+---@param action "continue"|"abort"|"skip"
+---@param callback plugins.scm.backend.onexecstatus
+function Git:resolve_operation(directory, operation, action, callback)
+  if
+    not ({ rebase = true, merge = true, ["cherry-pick"] = true, revert = true })[operation]
+    or action ~= "continue" and action ~= "abort" and action ~= "skip"
+    or action == "skip" and operation == "merge"
+  then
+    callback(false, "Unsupported operation action.")
+    return
+  end
+  self:execute(
+    function(proc)
+      self:handle_exec_status(proc, callback)
+    end,
+    git_repo_dir(directory),
+    "-c",
+    "core.editor=true",
+    operation,
+    "--" .. action
+  )
+end
+
+---@return boolean
+function Git:supports_stashes()
+  return true
+end
+
+---@param directory string
+---@param callback fun(stashes:table[]?, errmsg?:string)
+function Git:get_stashes(directory, callback)
+  self:execute(
+    function(proc)
+      local stdout = self:get_process_output(proc, "stdout")
+      local stderr = self:get_process_output(proc, "stderr")
+      if not proc or proc:returncode() ~= 0 then
+        callback(nil, stderr)
+        return
+      end
+      local list = {}
+      for line in stdout:gmatch "[^\n]+" do
+        local id, hash, message = line:match "^(.-)%z(.-)%z(.*)$"
+        if id then
+          list[#list + 1] =
+            { id = id, name = id, commit = hash, message = message }
+        end
+      end
+      callback(list)
+    end,
+    git_repo_dir(directory),
+    "--no-optional-locks",
+    "stash",
+    "list",
+    "--format=%gd%x00%H%x00%gs"
+  )
+end
+
+function Git:save_stash(directory, message, callback, options)
+  local args = { "stash", "push", "-m", message }
+  if options and options.untracked then
+    args[#args + 1] = "--include-untracked"
+  end
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, git_repo_dir(directory), table.unpack(args))
+end
+
+function Git:apply_stash(id, directory, callback, options)
+  local args = { "stash", "apply" }
+  if options and options.index then
+    args[#args + 1] = "--index"
+  end
+  args[#args + 1] = id
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, git_repo_dir(directory), table.unpack(args))
+end
+
+function Git:delete_stash(id, directory, callback)
+  self:execute(function(proc)
+    self:handle_exec_status(proc, callback)
+  end, git_repo_dir(directory), "stash", "drop", id)
+end
+
+function Git:get_stash_diff(id, directory, callback)
+  self:execute(
+    function(proc)
+      local stdout = self:get_process_output(proc, "stdout")
+      local stderr = self:get_process_output(proc, "stderr")
+      if not proc or proc:returncode() ~= 0 then
+        callback(nil, stderr)
+      else
+        callback(stdout)
+      end
+    end,
+    git_repo_dir(directory),
+    "--no-optional-locks",
+    "stash",
+    "show",
+    "-p",
+    "--no-ext-diff",
+    "--no-color",
+    id
+  )
+end
+
+---@param patch string
+---@param directory string
+---@param reverse boolean
+---@param callback plugins.scm.backend.onexecstatus
+function Git:apply_index_patch(patch, directory, reverse, callback)
+  directory = git_repo_dir(directory)
+  if not self.command then
+    callback(false, "Git executable is unavailable.")
+    return
+  end
+  self:with_commit_message_file(patch, function(filename, cleanup, errmsg)
+    if not filename then
+      callback(false, errmsg)
+      return
+    end
+    local params =
+      { "--no-optional-locks", "apply", "--cached", "--whitespace=nowarn" }
+    if reverse then
+      params[#params + 1] = "--reverse"
+    end
+    params[#params + 1] = "--"
+    params[#params + 1] = filename
+    self:execute(function(proc)
+      self:handle_exec_status(proc, function(ok, err)
+        cleanup()
+        callback(ok, err)
+      end)
+    end, directory, table.unpack(params))
+  end)
+end
+
+---@param directory string
+---@param callback fun(history:table[]?, errmsg?:string)
+---@param target? string
+---@param limit? integer
+function Git:get_review_history(directory, callback, target, limit)
+  directory = git_repo_dir(directory)
+  local params = {
+    "--no-optional-locks",
+    "log",
+    "--topo-order",
+    "--no-color",
+    "-n",
+    tostring(limit or 200),
+    "--format=%H%x00%an%x00%at%x00%s%x00%D%x00%P",
+  }
+  params[#params + 1] = target or "--all"
+  self:execute(function(proc)
+    local stdout = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if not proc or proc:returncode() ~= 0 then
+      callback(nil, stderr ~= "" and stderr or "Could not read Git history.")
+      return
+    end
+    local history = {}
+    for line in stdout:gmatch "([^\n]+)" do
+      local hash, author, date, summary, refs, parents =
+        line:match "^(.-)%z(.-)%z(.-)%z(.-)%z(.-)%z(.*)$"
+      if hash then
+        history[#history + 1] = {
+          hash = hash,
+          author = author,
+          date = os.date("%Y-%m-%d %H:%M", tonumber(date)),
+          summary = summary,
+          refs = refs,
+          parents = parents,
+        }
+      end
+      if #history % 100 == 0 then
+        self:yield()
+      end
+    end
+    callback(history)
+  end, directory, table.unpack(params))
 end
 
 ---@param directory string Path of project directory
@@ -528,52 +810,16 @@ end
 ---@param changes table Where to store the changes found
 ---@param callback? function
 local function get_changes(self, directory, changes, callback)
-  self:get_staged(directory, function(staged_files)
-    self:execute(function(proc)
-      if not proc then
-        if callback then callback(false) end
-        return
-      end
-      ---@type plugins.scm.backend.filechange[]
-      local added = {}
-      for idx, line in self:get_process_lines(proc, "stdout") do
-        if line ~= "" then
-          local status, path = line:match("%s*(%S+)%s+(%S+)")
-          local new_path = nil
-          if status and path and not added[path] then
-            if status == "A" then
-              status = "added"
-            elseif status == "D" then
-              status = "deleted"
-            elseif status == "M" then
-              status = "edited"
-            elseif status == "R" then
-              status = "renamed"
-              new_path = line:match("%s*%S+%s+%S+%s*%S+%s*(%S+)")
-            elseif status == "??" then
-              status = "untracked"
-            end
-            table.insert(changes, {
-              status = status,
-              staged = staged_files[path] or nil,
-              path = common.normalize_path(directory .. PATHSEP .. path),
-              new_path = new_path and common.normalize_path(directory .. PATHSEP .. new_path) or nil
-            })
-            added[path] = true
-          end
-        end
-        if idx % 50 == 0 then
-          self:yield()
-        end
-      end
-      if proc:returncode() ~= 0 then
-        if callback then callback(false) end
-        return
-      end
-      if callback then
-        callback(true)
-      end
-    end, directory, "--no-optional-locks", "status", "--short")
+  self:get_working_changes(directory, function(list)
+    if not list then
+      if callback then callback(false) end
+      return
+    end
+    for i, entry in ipairs(list) do
+      changes[#changes + 1] = entry
+      if i % 100 == 0 then self:yield() end
+    end
+    if callback then callback(true) end
   end)
 end
 
@@ -717,37 +963,26 @@ end
 ---@param callback plugins.scm.backend.ongetcommit
 function Git:get_commit_info(id, directory, callback)
   directory = git_repo_dir(directory)
-  self:execute(function(proc)
-    ---@type plugins.scm.backend.commit
-    local commit = {}
-    for idx, line in self:get_process_lines(proc, "stdout") do
-      if not commit.hash then
-        commit.hash = line:match("commit%s+([a-zA-Z0-9]+)$")
-      elseif not commit.author then
-        commit.author = line:match("Author:%s+(.+)$")
-      elseif not commit.date then
-        commit.date = line:match("Date:%s+(.+)$")
-      elseif not commit.summary then
-        commit.summary = line:match("    (.+)")
-      else
-        if commit.message then
-          commit.message = commit.message .. "\n" .. (line:match("    (.+)") or "")
-        elseif line ~= "" then
-          local message = line:match("    (.+)")
-          if message then
-            commit.message = (line:match("    (.*)") or "")
-          end
-        end
-        if idx % 10 == 0 then self:yield() end
-      end
+  if not tools.safe_ref(id) then
+    callback(nil, false, "Invalid commit.")
+    return
+  end
+  tools.run(self, directory, {
+    "--no-optional-locks", "show", "--no-patch", "--no-color",
+    "--no-show-signature", "--no-notes",
+    "--format=%H%x00%an <%ae>%x00%aI%x00%B%x00", id, "--",
+  }, function(output, errmsg)
+    if not output then callback(nil, false, errmsg) return end
+    local hash, author, date, message =
+      output:match("^(.-)%z(.-)%z(.-)%z(.-)%z")
+    if not hash then
+      callback(nil, false, "Could not parse Git commit details.")
+      return
     end
-
-    if commit.message then
-      commit.message = commit.message:match("(.*)%s+$")
-    end
-
-    callback(commit)
-  end, directory, "--no-optional-locks", "show", "--no-patch", id)
+    local subject, body = tools.split_message(message)
+    callback({ hash = hash, author = author, date = date,
+      summary = subject, message = body })
+  end)
 end
 
 ---@param directory string Project directory
@@ -772,7 +1007,9 @@ function Git:get_commit_diff(id, directory, callback)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
-  end, directory, "--no-optional-locks", "show", "-U", id)
+  end, directory, "--no-optional-locks", "show", "--first-parent", "--patch",
+    "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/",
+    "--dst-prefix=b/", "--submodule=short", id, "--")
 end
 
 ---@param branch string
@@ -784,7 +1021,9 @@ function Git:get_branch_diff(branch, head_branch, directory, callback)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
-  end, directory, "--no-optional-locks", "diff", head_branch .. "..." .. branch)
+  end, directory, "--no-optional-locks", "diff", "--no-ext-diff",
+    "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/",
+    "--submodule=short", head_branch .. "..." .. branch, "--")
 end
 
 ---@param tag string
@@ -796,7 +1035,9 @@ function Git:get_tag_diff(tag, head_branch, directory, callback)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
-  end, directory, "--no-optional-locks", "diff", tag .. "..." .. head_branch)
+  end, directory, "--no-optional-locks", "diff", "--no-ext-diff",
+    "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/",
+    "--submodule=short", tag .. "..." .. head_branch, "--")
 end
 
 ---@param id? string
@@ -824,7 +1065,9 @@ function Git:get_diff(directory, callback)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
     callback(diff)
-  end, directory, "--no-optional-locks", "diff")
+  end, directory, "--no-optional-locks", "diff", "--no-ext-diff",
+    "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/",
+    "--submodule=short", "--")
 end
 
 ---@param file string
@@ -833,8 +1076,15 @@ function Git:get_file_diff(file, directory, callback)
   directory = git_repo_dir(directory, file)
   self:execute(function(proc)
     local diff = self:get_process_output(proc, "stdout")
+    local stderr = self:get_process_output(proc, "stderr")
+    if not proc or proc:returncode() ~= 0 then
+      callback(nil, false, stderr ~= "" and stderr or "Could not read Git diff.")
+      return
+    end
     callback(diff)
-  end, directory, "--no-optional-locks", "diff", common.relative_path(directory, file))
+  end, directory, "--no-optional-locks", "diff", "--no-ext-diff", "--no-color",
+    "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "--submodule=short",
+    "--", common.relative_path(directory, file))
 end
 
 ---@param file string
@@ -843,30 +1093,24 @@ end
 function Git:get_file_status(file, directory, callback)
   directory = git_repo_dir(directory, file)
   self:execute(function(proc)
-    local status = "unchanged"
     local output = self:get_process_output(proc, "stdout")
-    for line in output:gmatch("[^\n]+") do
-      if line ~= "" then
-        status = line:match("^%s*(%S+)")
-        if status then
-          if status == "A" then
-            status = "added"
-          elseif status == "D" then
-            status = "deleted"
-          elseif status == "M" then
-            status = "edited"
-          elseif status == "R" then
-            status = "renamed"
-          elseif status == "??" then
-            status = "untracked"
-          end
-          break
-        end
-      end
-      self:yield()
+    self:get_process_output(proc, "stderr")
+    if not proc or proc:returncode() ~= 0 then
+      callback(nil)
+      return
     end
-    callback(status)
-  end, directory, "--no-optional-locks", "status", "-s", common.relative_path(directory, file))
+    -- Ignored files are not tracked, even though ordinary status omits them.
+    if output:sub(1, 2) == "!!" then
+      callback("untracked")
+      return
+    end
+    local entries = review.git_status(output, directory, function()
+      self:yield()
+    end)
+    callback(entries[1] and entries[1].status or "unchanged")
+  end, directory, "--no-optional-locks", "--literal-pathspecs", "status",
+    "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=all", "--",
+    common.relative_path(directory, file))
 end
 
 ---@param file string
@@ -875,27 +1119,12 @@ end
 function Git:get_file_blame(file, directory, callback)
   directory = git_repo_dir(directory, file)
   self:execute(function(proc)
-    ---@type plugins.scm.backend.blame[]
-    local list = {}
-    for idx, line in self:get_process_lines(proc, "stdout") do
-      if line ~= "" then
-        local commit, author, date = line:match(
-          "^%^?([A-Fa-f0-9]+) %((.-) (%d%d%d%d%-%d%d%-%d%d)"
-        )
-        if commit then
-          table.insert(list, {
-            commit = commit,
-            author = author:match("^%s*(.-)%s*$"), -- trim spaces
-            date = date
-          })
-        end
-      end
-      if idx % 100 == 0 then
-        self:yield()
-      end
-    end
+    local output = self:get_process_output(proc, "stdout")
+    if not proc or proc:returncode() ~= 0 then callback(nil); return end
+    local list = review.git_blame(output, function() self:yield() end)
     callback(#list > 0 and list or nil)
-  end, directory, "--no-optional-locks", "blame", common.relative_path(directory, file))
+  end, directory, "--no-optional-locks", "blame", "--porcelain", "--",
+    common.relative_path(directory, file))
 end
 
 ---@param callback plugins.scm.backend.ongetstats
@@ -998,8 +1227,44 @@ end
 ---@param callback plugins.scm.backend.onexecstatus
 ---@param username? string Ignored by Git
 ---@param password? string Ignored by Git
-function Git:push(directory, callback, username, password)
+---@param options? plugins.scm.backend.pushoptions
+function Git:push(directory, callback, username, password, options)
   directory = git_repo_dir(directory)
+  if options then
+    if not tools.safe_ref(options.remote)
+      or not tools.safe_ref(options.branch)
+      or not tools.safe_ref(options.target)
+    then
+      callback(false, "Choose a valid remote, local and destination branch.")
+      return
+    end
+    local function push()
+      self:push_ref(directory, options.remote, options.branch, "branch",
+        options, callback)
+    end
+    tools.run(self, directory,
+      { "check-ref-format", "refs/heads/" .. options.branch },
+      function(output, errmsg)
+        if not output then
+          callback(false, "Invalid local branch '" .. options.branch
+            .. "'.\n" .. (errmsg or ""))
+        elseif options.target == options.branch then
+          push()
+        else
+          tools.run(self, directory,
+            { "check-ref-format", "refs/heads/" .. options.target },
+            function(valid, err)
+              if valid then
+                push()
+              else
+                callback(false, "Invalid destination branch '" .. options.target
+                  .. "'.\n" .. (err or ""))
+              end
+            end)
+        end
+      end)
+    return
+  end
   self:execute(function(proc)
     self:handle_exec_status(proc, callback)
   end, directory, "--no-optional-locks", "push")
@@ -1265,5 +1530,7 @@ function Git:move_path(from, to, directory, callback)
   )
 end
 
+
+require "plugins.scm.backend.gittools"(Git)
 
 return Git

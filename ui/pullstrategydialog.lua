@@ -88,15 +88,29 @@ function PullStrategyDialog:update_size_position()
   PullStrategyDialog.super.update_size_position(self)
 
   local padding = style.padding.x / 2
-  local width = math.max(560 * SCALE, core.root_view.size.x * 0.42)
-  local height = math.max(270 * SCALE, core.root_view.size.y * 0.28)
-  self:set_size(width, height)
-  self.panel:set_size(
-    width,
-    height - self.title:get_height() - style.padding.y
+  local width = math.min(
+    core.root_view.size.x - 40 * SCALE,
+    math.max(560 * SCALE, core.root_view.size.x * 0.42)
   )
+  local height = math.min(
+    core.root_view.size.y - 60 * SCALE,
+    math.max(300 * SCALE, core.root_view.size.y * 0.28)
+  )
+  self:set_size(width, height)
+  self.panel:set_size(width, height - self.title:get_height() - style.padding.y)
   local panel_height = self.panel:get_height()
-  local buttons_y = panel_height - self.merge:get_height() - (style.padding.y / 2)
+  self.remember:set_wrap_width(width - style.padding.x)
+  local controls = { self.merge, self.rebase, self.ff_only, self.cancel }
+  local x, rows = padding, 1
+  for _, control in ipairs(controls) do
+    if x + control:get_width() > width - padding then
+      x, rows = padding, rows + 1
+    end
+    control.layout_x, control.layout_row = x, rows
+    x = x + control:get_width() + style.padding.x
+  end
+  local buttons_y = math.max(panel_height, 240 * SCALE)
+    - rows * (self.merge:get_height() + style.padding.y)
   local remember_y = buttons_y - self.remember:get_height() - style.padding.y
   local line_y = remember_y - style.padding.y
 
@@ -109,10 +123,14 @@ function PullStrategyDialog:update_size_position()
   self.remember:set_position(padding, remember_y)
   self.line:set_position(0, line_y)
 
-  self.merge:set_position(padding, buttons_y)
-  self.rebase:set_position(self.merge:get_right() + style.padding.x, buttons_y)
-  self.ff_only:set_position(self.rebase:get_right() + style.padding.x, buttons_y)
-  self.cancel:set_position(self.ff_only:get_right() + style.padding.x, buttons_y)
+  for _, control in ipairs(controls) do
+    control:set_position(
+      control.layout_x,
+      buttons_y
+        + (control.layout_row - 1)
+          * (self.merge:get_height() + style.padding.y)
+    )
+  end
 
   self.close:set_position(
     self.size.x - self.close.size.x - (style.padding.x / 2),

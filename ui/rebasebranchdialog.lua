@@ -12,6 +12,7 @@ local Line = require "widget.line"
 local ListBox = require "widget.listbox"
 local MessageBox = require "widget.messagebox"
 local TextBox = require "widget.textbox"
+local SelectBox = require "widget.selectbox"
 local Widget = require "widget"
 
 ---@class plugins.scm.ui.RebaseBranchDialog : widget.dialog
@@ -24,8 +25,7 @@ local Widget = require "widget"
 ---@field private list_container widget
 ---@field private list widget.listbox
 ---@field private strategy_label widget.label
----@field private strategy_container widget
----@field private strategy_list widget.listbox
+---@field private strategy_list widget.selectbox
 ---@field private line widget.line
 ---@field private rebase widget.button
 ---@field private cancel widget.button
@@ -62,15 +62,7 @@ function RebaseBranchDialog:new(project_dir, branch, branches)
   self.list:add_column("Message")
 
   self.strategy_label = Label(self.panel, "Conflict strategy")
-  self.strategy_container = Widget(self.panel)
-  self.strategy_container.border.width = 0
-  self.strategy_container:set_size(500 * SCALE, 92 * SCALE)
-
-  self.strategy_list = ListBox(self.strategy_container)
-  self.strategy_list.border.width = 0
-  self.strategy_list:enable_expand(true)
-  self.strategy_list:add_column("Strategy")
-  self.strategy_list:add_column("Description")
+  self.strategy_list = SelectBox(self.panel, "Conflict strategy")
 
   self.line = Line(self.panel, 1, style.padding.x)
   self.rebase = Button(self.panel, "Rebase")
@@ -146,11 +138,7 @@ end
 ---@param label string
 ---@param description string
 function RebaseBranchDialog:add_strategy(value, label, description)
-  self.strategy_list:add_row({
-    style.syntax.keyword, label,
-    ListBox.COLEND,
-    style.text, description
-  }, value)
+  self.strategy_list:add_option(label .. " - " .. description, value)
 end
 
 ---@return plugins.scm.backend.branch?
@@ -164,11 +152,7 @@ end
 
 ---@return plugins.scm.backend.rebasestrategy
 function RebaseBranchDialog:get_selected_strategy()
-  local idx = self.strategy_list:get_selected()
-  if idx then
-    return self.strategy_list:get_row_data(idx)
-  end
-  return "normal"
+  return self.strategy_list:get_selected_data() or "normal"
 end
 
 function RebaseBranchDialog:submit()
@@ -197,35 +181,53 @@ function RebaseBranchDialog:update_size_position()
   RebaseBranchDialog.super.update_size_position(self)
 
   local padding = style.padding.x / 2
-  local width = math.max(640 * SCALE, core.root_view.size.x * 0.48)
-  local height = math.max(520 * SCALE, core.root_view.size.y * 0.58)
-  self:set_size(width, height)
-  self.panel:set_size(
-    width,
-    height - self.title:get_height() - style.padding.y
+  local width = math.min(
+    core.root_view.size.x - 40 * SCALE,
+    math.max(640 * SCALE, core.root_view.size.x * 0.48)
   )
-  local panel_height = self.panel:get_height()
+  local height = math.min(
+    core.root_view.size.y - 60 * SCALE,
+    math.max(460 * SCALE, core.root_view.size.y * 0.58)
+  )
+  self:set_size(width, height)
+  self.panel:set_size(width, height - self.title:get_height() - style.padding.y)
+  local panel_height = math.max(self.panel:get_height(), 360 * SCALE)
 
   self.branch_label:set_position(padding, 0)
 
-  self.base_label:set_position(padding, self.branch_label:get_bottom() + style.padding.y)
-  self.filter_textbox:set_position(padding, self.base_label:get_bottom() + style.padding.y / 2)
-  self.filter_textbox:set_size(width - style.padding.x, self.filter_textbox:get_real_height())
+  self.base_label:set_position(
+    padding,
+    self.branch_label:get_bottom() + style.padding.y
+  )
+  self.filter_textbox:set_position(
+    padding,
+    self.base_label:get_bottom() + style.padding.y / 2
+  )
+  self.filter_textbox:set_size(
+    width - style.padding.x,
+    self.filter_textbox:get_real_height()
+  )
 
-  local buttons_y = panel_height - self.rebase:get_height() - (style.padding.y / 2)
+  local buttons_y = panel_height
+    - self.rebase:get_height()
+    - (style.padding.y / 2)
   self.line:set_position(0, buttons_y - style.padding.y)
 
-  local strategy_height = 92 * SCALE
-  local strategy_y = self.line:get_position().y - strategy_height - style.padding.y
+  local strategy_height = self.strategy_list:get_height()
+  local strategy_y = self.line:get_position().y
+    - strategy_height
+    - style.padding.y
   self.strategy_label:set_position(
     padding,
     strategy_y - self.strategy_label:get_height() - style.padding.y / 2
   )
-  self.strategy_container:set_position(padding, strategy_y)
-  self.strategy_container:set_size(width - style.padding.x, strategy_height)
-  self.strategy_list:resize_to_parent()
+  self.strategy_list:set_position(padding, strategy_y)
+  self.strategy_list:set_size(width - style.padding.x, strategy_height)
 
-  self.list_container:set_position(padding, self.filter_textbox:get_bottom() + style.padding.y)
+  self.list_container:set_position(
+    padding,
+    self.filter_textbox:get_bottom() + style.padding.y
+  )
   self.list_container:set_size(
     width - style.padding.x,
     math.max(

@@ -7,12 +7,25 @@ local util = {}
 
 ---@return string project_dir
 function util.get_current_project()
-  if core.active_view and core.active_view.doc and core.active_view.doc.abs_filename then
+  local view, visited = core.active_view, {}
+  while view and not visited[view] do
+    if type(view.project_dir) == "string" then
+      return view.project_dir
+    end
+    visited[view] = true
+    view = view.parent
+      or view.subparent
+      or view.floating_options and view.floating_options.owner
+  end
+  if
+    core.active_view
+    and core.active_view.doc
+    and core.active_view.doc.abs_filename
+  then
     local filename = core.active_view.doc.abs_filename
-    for _, project in ipairs(core.projects) do
-      if common.path_belongs_to(filename, project.path) then
-        return project.path
-      end
+    local project = util.get_file_project_dir(filename)
+    if project then
+      return project
     end
   end
   return core.root_project().path
@@ -21,12 +34,19 @@ end
 ---@param filepath string
 ---@return string? project_dir
 function util.get_file_project_dir(filepath)
+  local closest
   for _, project in ipairs(core.projects or {}) do
-    if common.path_belongs_to(filepath, project.path) then
-      return project.path
+    local directory = project.path
+    local prefix = directory:sub(-1) == PATHSEP
+      and directory:sub(1, -2) or directory
+    if
+      (filepath == directory or common.path_belongs_to(filepath, prefix))
+      and (not closest or #directory > #closest)
+    then
+      closest = directory
     end
   end
-  return nil
+  return closest
 end
 
 ---Get project directory for given file or current project dir if non given.

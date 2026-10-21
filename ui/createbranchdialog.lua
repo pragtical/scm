@@ -160,20 +160,45 @@ function CreateBranchDialog:update_size_position()
   CreateBranchDialog.super.update_size_position(self)
 
   local padding = style.padding.x / 2
-  local width = math.max(600 * SCALE, core.root_view.size.x * 0.45)
-  local height = math.max(420 * SCALE, core.root_view.size.y * 0.5)
+  local width = math.min(
+    core.root_view.size.x - 40 * SCALE,
+    math.max(600 * SCALE, core.root_view.size.x * 0.45)
+  )
+  local height = math.min(
+    core.root_view.size.y - 60 * SCALE,
+    math.max(420 * SCALE, core.root_view.size.y * 0.5)
+  )
   self:set_size(width, height)
-  local panel_height = self.panel:get_height()
+  self.panel:set_size(width, height - self.title:get_height() - style.padding.y)
+  local panel_height = math.max(self.panel:get_height(), 360 * SCALE)
+  self.checkout:set_wrap_width(width - style.padding.x)
 
   self.branch_label:set_position(padding, 0)
-  self.branch_textbox:set_position(padding, self.branch_label:get_bottom() + style.padding.y / 2)
-  self.branch_textbox:set_size(width - style.padding.x, self.branch_textbox:get_real_height())
+  self.branch_textbox:set_position(
+    padding,
+    self.branch_label:get_bottom() + style.padding.y / 2
+  )
+  self.branch_textbox:set_size(
+    width - style.padding.x,
+    self.branch_textbox:get_real_height()
+  )
 
-  self.base_label:set_position(padding, self.branch_textbox:get_bottom() + style.padding.y)
-  self.filter_textbox:set_position(padding, self.base_label:get_bottom() + style.padding.y / 2)
-  self.filter_textbox:set_size(width - style.padding.x, self.filter_textbox:get_real_height())
+  self.base_label:set_position(
+    padding,
+    self.branch_textbox:get_bottom() + style.padding.y
+  )
+  self.filter_textbox:set_position(
+    padding,
+    self.base_label:get_bottom() + style.padding.y / 2
+  )
+  self.filter_textbox:set_size(
+    width - style.padding.x,
+    self.filter_textbox:get_real_height()
+  )
 
-  local buttons_y = panel_height - self.create:get_height() - (style.padding.y / 2)
+  local buttons_y = panel_height
+    - self.create:get_height()
+    - (style.padding.y / 2)
 
   self.checkout:set_position(
     padding,
@@ -182,10 +207,16 @@ function CreateBranchDialog:update_size_position()
 
   self.line:set_position(0, self.checkout:get_position().y - style.padding.y)
 
-  self.list_container:set_position(padding, self.filter_textbox:get_bottom() + style.padding.y)
+  self.list_container:set_position(
+    padding,
+    self.filter_textbox:get_bottom() + style.padding.y
+  )
   self.list_container:set_size(
     width - style.padding.x,
-    math.max(120 * SCALE, self.line.position.y - self.list_container.position.y - style.padding.y)
+    math.max(
+      120 * SCALE,
+      self.line.position.y - self.list_container.position.y - style.padding.y
+    )
   )
   self.list:resize_to_parent()
 

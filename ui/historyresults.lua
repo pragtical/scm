@@ -13,7 +13,6 @@ local Line = require "widget.line"
 local ListBox = require "widget.listbox"
 local TextBox = require "widget.textbox"
 local ContextMenu = require "core.contextmenu"
-local View = require "core.view"
 
 ---@type plugins.scm
 local scm
@@ -35,6 +34,7 @@ local HistoryResults = Widget:extend()
 
 ---@type core.contextmenu
 HistoryResults.menu = ContextMenu()
+require "plugins.scm.ui.listmenu" (HistoryResults.menu)
 
 ---Constructor
 ---@param project_dir string
@@ -45,18 +45,6 @@ HistoryResults.menu = ContextMenu()
 ---@param range_base? string
 function HistoryResults:new(project_dir, path, target, target_type, backend, range_base)
   HistoryResults.super.new(self)
-
-  -- close when automatically loaded from workspace plugin
-  if not project_dir then
-    core.add_thread(function()
-      -- core should offer a function to easily close a view...
-      local parent = core.root_view.root_node:get_node_for_view(self)
-      if parent then
-        parent:close_view(core.root_view.root_node, self)
-      end
-    end)
-    return
-  end
 
   if not scm then
     scm = require "plugins.scm"
@@ -156,28 +144,12 @@ function HistoryResults:selected_is_current_commit()
 end
 
 function HistoryResults:on_mouse_pressed(button, x, y, clicks)
-  if not View.set_floating and HistoryResults.menu.show_context_menu then
-    return HistoryResults.menu:on_mouse_pressed(button, x, y, clicks)
-  end
   local processed = HistoryResults.super.on_mouse_pressed(self, button, x, y, clicks)
   local handled = false
-  if (button == "right" or not View.set_floating) and self.list:mouse_on_top(x, y) then
+  if button == "right" and self.list:mouse_on_top(x, y) then
     handled = HistoryResults.menu:on_mouse_pressed(button, x, y, clicks)
   end
   return handled or processed
-end
-
-if not View.set_floating then
-  ---Route popup motion manually on editor versions without floating views.
-  ---@param x number Screen x coordinate
-  ---@param y number Screen y coordinate
-  ---@param dx number Horizontal movement
-  ---@param dy number Vertical movement
-  ---@return boolean? handled Whether the menu or widget handled the motion
-  function HistoryResults:on_mouse_moved(x, y, dx, dy)
-    if HistoryResults.menu:on_mouse_moved(x, y) then return true end
-    return HistoryResults.super.on_mouse_moved(self, x, y, dx, dy)
-  end
 end
 
 ---Add a new commit element to the history.
@@ -271,22 +243,12 @@ function HistoryResults:on_selected(idx, data)
   scm.open_commit_diff(data.hash, self.project_dir)
 end
 
-if not View.set_floating then
-  ---Draw the popup manually on editor versions without floating views.
-  function HistoryResults:draw()
-    if HistoryResults.super.draw(self) then
-      HistoryResults.menu:draw()
-    end
-  end
-end
-
 function HistoryResults:update()
   if not HistoryResults.super.update(self) then return end
   -- update the positions and sizes
   self.background_color = style.background
   self.title:set_position(style.padding.x, style.padding.y)
   if not self.searching or #self.list.rows > 0 then
-    if not View.set_floating then HistoryResults.menu:update() end
     local label = "Commits: "
     if self.searching then
       label = "Loading Commits: "

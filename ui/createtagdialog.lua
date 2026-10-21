@@ -185,39 +185,79 @@ function CreateTagDialog:update_size_position()
   CreateTagDialog.super.update_size_position(self)
 
   local padding = style.padding.x / 2
-  local width = math.max(600 * SCALE, core.root_view.size.x * 0.45)
-  local height = math.max(500 * SCALE, core.root_view.size.y * 0.58)
+  local width = math.min(
+    core.root_view.size.x - 40 * SCALE,
+    math.max(600 * SCALE, core.root_view.size.x * 0.45)
+  )
+  local height = math.min(
+    core.root_view.size.y - 60 * SCALE,
+    math.max(500 * SCALE, core.root_view.size.y * 0.58)
+  )
   self:set_size(width, height)
-  local panel_height = self.panel:get_height()
+  self.panel:set_size(width, height - self.title:get_height() - style.padding.y)
+  local panel_height = math.max(self.panel:get_height(), 460 * SCALE)
+  self.annotated:set_wrap_width(width - style.padding.x)
 
   self.tag_label:set_position(padding, 0)
-  self.tag_textbox:set_position(padding, self.tag_label:get_bottom() + style.padding.y / 2)
-  self.tag_textbox:set_size(width - style.padding.x, self.tag_textbox:get_real_height())
+  self.tag_textbox:set_position(
+    padding,
+    self.tag_label:get_bottom() + style.padding.y / 2
+  )
+  self.tag_textbox:set_size(
+    width - style.padding.x,
+    self.tag_textbox:get_real_height()
+  )
 
-  self.target_label:set_position(padding, self.tag_textbox:get_bottom() + style.padding.y)
-  self.filter_textbox:set_position(padding, self.target_label:get_bottom() + style.padding.y / 2)
-  self.filter_textbox:set_size(width - style.padding.x, self.filter_textbox:get_real_height())
+  self.target_label:set_position(
+    padding,
+    self.tag_textbox:get_bottom() + style.padding.y
+  )
+  self.filter_textbox:set_position(
+    padding,
+    self.target_label:get_bottom() + style.padding.y / 2
+  )
+  self.filter_textbox:set_size(
+    width - style.padding.x,
+    self.filter_textbox:get_real_height()
+  )
 
-  local buttons_y = panel_height - self.create:get_height() - (style.padding.y / 2)
-  self.message_textbox:set_size(width - style.padding.x, self.message_textbox:get_real_height())
+  local buttons_y = panel_height
+    - self.create:get_height()
+    - (style.padding.y / 2)
+  self.message_textbox:set_size(
+    width - style.padding.x,
+    self.message_textbox:get_real_height()
+  )
   self.message_textbox:set_position(
     padding,
     buttons_y - self.message_textbox:get_height() - style.padding.y
   )
   self.message_label:set_position(
     padding,
-    self.message_textbox:get_position().y - self.message_label:get_height() - style.padding.y / 2
+    self.message_textbox:get_position().y
+      - self.message_label:get_height()
+      - style.padding.y / 2
   )
   self.annotated:set_position(
     padding,
-    self.message_label:get_position().y - self.annotated:get_height() - style.padding.y
+    self.message_label:get_position().y
+      - self.annotated:get_height()
+      - style.padding.y
   )
   self.line:set_position(0, self.annotated:get_position().y - style.padding.y)
 
-  self.list_container:set_position(padding, self.filter_textbox:get_bottom() + style.padding.y)
+  self.list_container:set_position(
+    padding,
+    self.filter_textbox:get_bottom() + style.padding.y
+  )
   self.list_container:set_size(
     width - style.padding.x,
-    math.max(120 * SCALE, self.line:get_position().y - self.list_container:get_position().y - style.padding.y)
+    math.max(
+      120 * SCALE,
+      self.line:get_position().y
+        - self.list_container:get_position().y
+        - style.padding.y
+    )
   )
   self.list:resize_to_parent()
 
