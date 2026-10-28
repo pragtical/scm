@@ -171,6 +171,8 @@ local CHANGES = {}
 local CONFLICT_COUNTS = {}
 local PATH_STATUS = {}
 
+local start_update_worker
+
 ---Opened projects SCM backends list
 ---@type table<string,plugins.scm.backend>
 local PROJECTS = {}
@@ -200,6 +202,7 @@ setmetatable(PROJECTS, {
           end
           rawset(t, k, v)
           backend:watch_project(k)
+          if start_update_worker then start_update_worker() end
         end
       end
     end
@@ -573,6 +576,7 @@ end
 ---@param backend plugins.scm.backend
 function scm.register_backend(backend)
   BACKENDS[backend.name] = backend
+  scm.request_update()
 end
 
 ---Remove an existing SCM backend.
@@ -2072,6 +2076,7 @@ end
 local update_queued = false
 local function queue_update()
   update_queued = true
+  if start_update_worker then start_update_worker() end
 end
 
 ---Request a status refresh through the existing coalesced update worker.
@@ -2080,23 +2085,32 @@ function scm.request_update()
   queue_update()
 end
 
-queue_update() -- perform update on startup
+---Keep the coalesced worker alive only while a scan or repository watch needs it.
+start_update_worker = function()
+  if core.threads[scm] then return end
+  core.add_thread(function()
+    coroutine.yield(1) -- give startup a bit of time
+    while true do
+      local watching = false
+      local active_backends = {}
+      for _, backend in pairs(PROJECTS) do active_backends[backend] = true end
+      for backend in pairs(active_backends) do
+        watching = true
+        backend.watch:check(function(file) queue_update() end)
+      end
+      if not scanner.running and update_queued then
+        update_queued = false
+        scm.update()
+        -- A completed refresh may have just registered its repository watches.
+        watching = true
+      end
+      if not watching and not scanner.running and not update_queued then return end
+      coroutine.yield(1)
+    end
+  end, scm)
+end
 
-core.add_thread(function()
-  coroutine.yield(1) -- give startup a bit of time
-  while true do
-    for _, backend in pairs(BACKENDS) do
-      backend.watch:check(function(file)
-        queue_update()
-      end)
-    end
-    if not scanner.running and update_queued then
-      update_queued = false
-      scm.update()
-    end
-    coroutine.yield(1)
-  end
-end)
+queue_update() -- perform update on startup
 
 local dirwatch_check = DirWatch.check
 function DirWatch:check(...)
